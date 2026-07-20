@@ -29,6 +29,8 @@ WatchingTogether 是一款支持**异地同步观影**的桌面应用。朋友�
 
 ## 快速开始
 
+注：已上传服务端以及客户端的打包文件，仅需其中一人根据说明配置ngrok和启动服务器即可
+
 ### 环境要求
 
 - Python 3.10+
@@ -36,7 +38,7 @@ WatchingTogether 是一款支持**异地同步观影**的桌面应用。朋友�
 
 ### 安装依赖
 
-`ash
+`Bash
 pip install PySide6 python-mpv websockets
 `
 
@@ -65,7 +67,6 @@ python server.py
 `powershell
 python client.py
 `
-
 ---
 
 ## 项目结构
