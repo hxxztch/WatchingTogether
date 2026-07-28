@@ -38,7 +38,7 @@
 
 ### 安装依赖
 
-``bash
+`bash
 pip install PySide6 python-mpv websockets
 `
 
