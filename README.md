@@ -96,6 +96,16 @@ WatchingTogether/
 ---
 
 
+
+## 界面预览
+
+### 首页
+![首页](screenshots/film_homepage.png)
+
+### 加入房间
+![加入房间](screenshots/room2.png)
+
+
 ## 技术栈
 
 | 技术 | 用途 |
