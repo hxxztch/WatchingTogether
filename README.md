@@ -67,7 +67,6 @@ python server.py
 `powershell
 python client.py
 `
----
 
 ## 项目结构
 
