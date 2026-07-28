@@ -44,7 +44,7 @@ pip install PySide6 python-mpv websockets
 
 ### 启动服务端
 
-``powershell
+`powershell
 python server.py
 `
 同时打开自己的ngrok或其他内网穿透工具并获取ip地址
@@ -54,7 +54,7 @@ python server.py
 
 打开 config.json，填入服务器地址：
 
-``json
+`json
 {
   "server": "wss://xxx.ngrok-free.dev",
   "nickname": "你的昵称"
@@ -64,7 +64,7 @@ python server.py
 
 ### 启动客户端
 
-``powershell
+`powershell
 python client.py
 `
 ---
