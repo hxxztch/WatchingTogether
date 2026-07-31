@@ -1,5 +1,6 @@
 ﻿"""XiangJian GuanYing - Client entry point."""
-import sys, os
+import sys
+import os, os
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -19,6 +20,7 @@ else:
         _plugins_dir = os.path.join(_pyside6_dir, "plugins", "platforms")
         os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.abspath(_plugins_dir)
 
+os.environ['QT_LOGGING_RULES'] = 'qt.qpa.mousegrab.warning=false'
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPixmap
 from app.ui.main_window import MainWindow
