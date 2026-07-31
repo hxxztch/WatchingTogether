@@ -142,8 +142,6 @@ WatchingTogether/
 
 ---
 
----
-
 ## 作者
 
 [@hxxztch](https://github.com/hxxztch)
