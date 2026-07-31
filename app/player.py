@@ -33,6 +33,10 @@ class MpvWidget(QWidget):
             return
         self._setup_done = True
 
+        self._pending_dash_audio = None
+        self._dash_seek_pos = 0
+        self._dash_was_playing = True
+
         self._player = mpv.MPV(
             wid=str(int(self.winId())),
             keep_open="yes",
@@ -61,9 +65,22 @@ class MpvWidget(QWidget):
             else:
                 self.playback_started.emit()
 
+        @self._player.event_callback("file-loaded")
+        def _on_file_loaded(event):
+            if self._pending_dash_audio and self._player:
+                self._player.command("audio-add", self._pending_dash_audio, "select")
+                self._pending_dash_audio = None
+                # start property already positioned us; just restore play state
+                self._player.pause = not self._dash_was_playing
+
         @self._player.event_callback("end-file")
         def _on_end(event):
-            if event.get("event", "") == "end-file" and event.get("reason", 0) == 0:
+            try:
+                d = event.data if hasattr(event, 'data') else event
+                reason = (d or {}).get('reason', 0) if isinstance(d, dict) else getattr(d, 'reason', 0)
+            except Exception:
+                reason = 0
+            if reason == 0:
                 self.playback_ended.emit()
 
     def showEvent(self, event):
@@ -90,6 +107,13 @@ class MpvWidget(QWidget):
             self._player.wait_until_playing()
             self._player.seek(start_pos, "absolute")
 
+    def replace(self, path: str):
+        """Replace current file (for quality switching). Unlike load(), this stops old video."""
+        self._ensure_player()
+        self._player.command("stop")
+        self._player.loadfile(path)
+        self._player.pause = True
+
     def play(self):
         if self._player:
             self._player.pause = False
@@ -102,11 +126,28 @@ class MpvWidget(QWidget):
         if self._player:
             self._player.pause = not self._player.pause
 
-    def load_with_audio(self, video_url, audio_url):
-        """Load video with external audio track (for DASH streams like Bilibili)."""
+    def load_dash(self, video_url, audio_url, resume_play=True, seek_pos=None):
+        """Load DASH video and restore play state seamlessly."""
         if self._player:
+            # Pause first to freeze the playback position before capturing it
+            self._player.pause = True
+            if seek_pos is not None:
+                self._dash_seek_pos = seek_pos
+            else:
+                try:
+                    self._dash_seek_pos = (self._player.command("get_property", "time-pos") or 0) + 0.15
+                except Exception:
+                    self._dash_seek_pos = (self._player.time_pos or 0) + 0.15
+            self._dash_was_playing = resume_play
+            self._player["http-header-fields"] = "Referer: https://www.bilibili.com/"
+            self._pending_dash_audio = audio_url
+            self._player.start = self._dash_seek_pos  # start at saved position
             self._player.loadfile(video_url)
-            self._player.command("audio-add", audio_url, "select")
+
+    def loadfile(self, path: str):
+        """Directly replace current file with new URL (for quality switching)."""
+        if self._player:
+            self._player.loadfile(path)
 
     def seek(self, position: float):
         if self._player:
@@ -144,6 +185,44 @@ class MpvWidget(QWidget):
         if self._player:
             self._player.aid = track_id
 
+    def get_video_info(self) -> dict:
+        """Return current video stream info: width, height, fps, codec."""
+        if not self._player:
+            return {}
+        info = {}
+        try:
+            info['width'] = self._player._get_property('video-params/w')
+            info['height'] = self._player._get_property('video-params/h')
+            info['fps'] = self._player._get_property('video-params/average-fps')
+            info['codec'] = self._player._get_property('video-codec')
+        except Exception:
+            pass
+        return info
+
+    def get_quality_label(self) -> str:
+        """Human-readable quality string like '1080P 30fps'."""
+        info = self.get_video_info()
+        h = info.get('height')
+        if not h:
+            return ''
+        fps = info.get('fps')
+        parts = []
+        h = int(h)
+        if h >= 2160:
+            parts.append('4K')
+        elif h >= 1440:
+            parts.append('2K')
+        elif h >= 1080:
+            parts.append('1080P')
+        elif h >= 720:
+            parts.append('720P')
+        elif h >= 480:
+            parts.append('480P')
+        else:
+            parts.append(str(h) + 'P')
+        if fps:
+            parts.append('%.0f' % int(round(float(fps))) + 'fps')
+        return ' '.join(parts)
     def stop(self):
         if self._player:
             self._player.stop()
