@@ -109,6 +109,11 @@ class ControlsBar(QWidget):
         self._danmaku_input.setPlaceholderText("发个弹幕...")
         self._danmaku_input.returnPressed.connect(self._on_danmaku)
         layout.addWidget(self._danmaku_input)
+        self._danmaku_btn = QPushButton("发送")
+        self._danmaku_btn.setFixedSize(36, 24)
+        self._danmaku_btn.setStyleSheet("QPushButton { background-color: #444; color: #fff; border: 1px solid #555; border-radius: 3px; font-size: 11px; padding: 0; } QPushButton:hover { background-color: #555; }")
+        self._danmaku_btn.clicked.connect(self._on_danmaku)
+        layout.addWidget(self._danmaku_btn)
 
         # -- volume --
         vol_frame = QFrame()
