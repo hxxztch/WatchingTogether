@@ -1,0 +1,84 @@
+[%(asctime)s] INFO: Client starting (frozen=False)
+[%(asctime)s] DEBUG: Using proactor: IocpProactor
+[%(asctime)s] DEBUG: = connection is CONNECTING
+[%(asctime)s] DEBUG: > GET / HTTP/1.1
+[%(asctime)s] DEBUG: > Host: collage-surviving-grit.ngrok-free.dev
+[%(asctime)s] DEBUG: > Upgrade: websocket
+[%(asctime)s] DEBUG: > Connection: Upgrade
+[%(asctime)s] DEBUG: > Sec-WebSocket-Key: Kdikjd/2zk5iaV6CY4YPbA==
+[%(asctime)s] DEBUG: > Sec-WebSocket-Version: 13
+[%(asctime)s] DEBUG: > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+[%(asctime)s] DEBUG: > User-Agent: Python/3.8 websockets/13.1
+[%(asctime)s] DEBUG: < HTTP/1.1 101 Switching Protocols
+[%(asctime)s] DEBUG: < Connection: Upgrade
+[%(asctime)s] DEBUG: < Date: Sun, 02 Aug 2026 16:56:26 GMT
+[%(asctime)s] DEBUG: < Ngrok-Agent-Ips: 2001:da8:100f:117:1d5e:6805:e7d7:8ead
+[%(asctime)s] DEBUG: < Sec-Websocket-Accept: KpQLmjfIcvkxaL+faF48wQ6YnJ8=
+[%(asctime)s] DEBUG: < Sec-Websocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+[%(asctime)s] DEBUG: < Server: Python/3.8 websockets/13.1
+[%(asctime)s] DEBUG: < Upgrade: websocket
+[%(asctime)s] DEBUG: = connection is OPEN
+[%(asctime)s] INFO: Connected to wss://collage-surviving-grit.ngrok-free.dev
+[%(asctime)s] DEBUG: > CLOSE 1000 (OK) [2 bytes]
+[%(asctime)s] DEBUG: = connection is CLOSING
+[%(asctime)s] DEBUG: < CLOSE 1000 (OK) [2 bytes]
+[%(asctime)s] DEBUG: < EOF
+[%(asctime)s] DEBUG: > EOF
+[%(asctime)s] DEBUG: = connection is CLOSED
+[%(asctime)s] CRITICAL: Traceback (most recent call last):
+  File "E:\Study\code\film-app\app\network.py", line 35, in run
+    self._loop.run_until_complete(self._connect_loop())
+  File "E:\STUDY\Anaconda3\lib\asyncio\base_events.py", line 616, in run_until_complete
+    return future.result()
+asyncio.exceptions.CancelledError
+
+[%(asctime)s] DEBUG: Using proactor: IocpProactor
+[%(asctime)s] DEBUG: = connection is CONNECTING
+[%(asctime)s] DEBUG: > GET / HTTP/1.1
+[%(asctime)s] DEBUG: > Host: collage-surviving-grit.ngrok-free.dev
+[%(asctime)s] DEBUG: > Upgrade: websocket
+[%(asctime)s] DEBUG: > Connection: Upgrade
+[%(asctime)s] DEBUG: > Sec-WebSocket-Key: XASt73kaJKQOJFtFAnmiAg==
+[%(asctime)s] DEBUG: > Sec-WebSocket-Version: 13
+[%(asctime)s] DEBUG: > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+[%(asctime)s] DEBUG: > User-Agent: Python/3.8 websockets/13.1
+[%(asctime)s] DEBUG: < HTTP/1.1 101 Switching Protocols
+[%(asctime)s] DEBUG: < Connection: Upgrade
+[%(asctime)s] DEBUG: < Date: Sun, 02 Aug 2026 16:56:31 GMT
+[%(asctime)s] DEBUG: < Ngrok-Agent-Ips: 2001:da8:100f:117:1d5e:6805:e7d7:8ead
+[%(asctime)s] DEBUG: < Sec-Websocket-Accept: ywt0sQztjfS5KByx11K9h9j/iWk=
+[%(asctime)s] DEBUG: < Sec-Websocket-Extensions: permessage-deflate; server_max_window_bits=12; client_max_window_bits=12
+[%(asctime)s] DEBUG: < Server: Python/3.8 websockets/13.1
+[%(asctime)s] DEBUG: < Upgrade: websocket
+[%(asctime)s] DEBUG: = connection is OPEN
+[%(asctime)s] INFO: Connected to wss://collage-surviving-grit.ngrok-free.dev
+[%(asctime)s] DEBUG: < PING 06 59 c1 60 [binary, 4 bytes]
+[%(asctime)s] DEBUG: > PONG 06 59 c1 60 [binary, 4 bytes]
+[%(asctime)s] DEBUG: % sending keepalive ping
+[%(asctime)s] DEBUG: > PING 91 42 eb ac [binary, 4 bytes]
+[%(asctime)s] DEBUG: < PONG 91 42 eb ac [binary, 4 bytes]
+[%(asctime)s] DEBUG: % received keepalive pong
+[%(asctime)s] DEBUG: > TEXT '{"type": "create_room", "name": "幻想乡在逃吃货11"}' [58 bytes]
+[%(asctime)s] DEBUG: < TEXT '{"type": "room_created", "room": "7909", "membe...9003\\u5403\\u8d2711"]}' [101 bytes]
+[%(asctime)s] DEBUG: > TEXT '{"type": "chat", "message": "111"}' [34 bytes]
+[%(asctime)s] DEBUG: > TEXT '{"type": "chat", "message": "123"}' [34 bytes]
+[%(asctime)s] DEBUG: > TEXT '{"type": "chat", "message": "123"}' [34 bytes]
+[%(asctime)s] DEBUG: < PING 49 2e 76 be [binary, 4 bytes]
+[%(asctime)s] DEBUG: > PONG 49 2e 76 be [binary, 4 bytes]
+[%(asctime)s] DEBUG: % sending keepalive ping
+[%(asctime)s] DEBUG: > PING 3c e4 5c 04 [binary, 4 bytes]
+[%(asctime)s] DEBUG: < PONG 3c e4 5c 04 [binary, 4 bytes]
+[%(asctime)s] DEBUG: % received keepalive pong
+[%(asctime)s] DEBUG: > CLOSE 1000 (OK) [2 bytes]
+[%(asctime)s] DEBUG: = connection is CLOSING
+[%(asctime)s] DEBUG: < CLOSE 1000 (OK) [2 bytes]
+[%(asctime)s] DEBUG: < EOF
+[%(asctime)s] DEBUG: > EOF
+[%(asctime)s] DEBUG: = connection is CLOSED
+[%(asctime)s] CRITICAL: Traceback (most recent call last):
+  File "E:\Study\code\film-app\app\network.py", line 35, in run
+    self._loop.run_until_complete(self._connect_loop())
+  File "E:\STUDY\Anaconda3\lib\asyncio\base_events.py", line 616, in run_until_complete
+    return future.result()
+asyncio.exceptions.CancelledError
+

@@ -102,6 +102,14 @@ class ControlsBar(QWidget):
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
         layout.addWidget(self._seek_bar, stretch=1)
 
+        # -- danmaku input --
+        self._danmaku_input = QLineEdit()
+        self._danmaku_input.setFixedWidth(120)
+        self._danmaku_input.setStyleSheet("background-color: #2a2a2a; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 2px 6px; font-size: 11px;")
+        self._danmaku_input.setPlaceholderText("发个弹幕...")
+        self._danmaku_input.returnPressed.connect(self._on_danmaku)
+        layout.addWidget(self._danmaku_input)
+
         # -- volume --
         vol_frame = QFrame()
         vol_frame.setFixedSize(32, 32)
@@ -170,21 +178,13 @@ class ControlsBar(QWidget):
 
         # -- more --
         self._more_btn = QPushButton("\u5176\u4ED6\u529F\u80FD")
-        self._more_btn.setFixedSize(60, 26)
+        self._more_btn.setFixedSize(72, 26)
         self._more_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 2px 4px; }")
         self._more_menu = QMenu(self)
         self._more_menu.setStyleSheet(MENU_STYLE)
         self._more_btn.setMenu(self._more_menu)
         layout.addWidget(self._more_btn)
         self._rebuild_more_menu()
-
-        # -- danmaku input --
-        self._danmaku_input = QLineEdit()
-        self._danmaku_input.setFixedWidth(120)
-        self._danmaku_input.setStyleSheet("background-color: #2a2a2a; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 2px 6px; font-size: 11px;")
-        self._danmaku_input.setPlaceholderText("发个弹幕...")
-        self._danmaku_input.returnPressed.connect(self._on_danmaku)
-        layout.addWidget(self._danmaku_input)
 
         # -- fullscreen --
         fs_btn = QPushButton("\u26F6")
