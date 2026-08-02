@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         s.setStretchFactor(0, 0)
         s.setStretchFactor(1, 1)
         s.setSizes([260, 1020])
+        self._splitter = s
         hlayout.addWidget(s)
         self.setCentralWidget(center)
 
@@ -707,13 +708,24 @@ class MainWindow(QMainWindow):
         self._left_panel.hide()
         self._controls.hide()
         self._fs_timer.stop()
+        # Save splitter sizes and give all space to player
+        self._saved_sizes = self._splitter.sizes()
+        self._splitter.setSizes([0, self._splitter.width()])
         self.showFullScreen()
+        # Force mpv to fill the entire window (fixes black bar at top on Windows)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self._player.update())
 
     def _exit_fullscreen(self):
         self._left_panel.show()
         self._controls.show()
         self._fs_timer.stop()
         self.showNormal()
+        # Restore splitter sizes
+        if hasattr(self, '_saved_sizes'):
+            self._splitter.setSizes(self._saved_sizes)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self._player.update())
 
     def _hide_fs_controls(self):
         if self.isFullScreen():
