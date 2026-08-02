@@ -36,6 +36,8 @@ class MpvWidget(QWidget):
         self._pending_dash_audio = None
         self._dash_seek_pos = 0
         self._dash_was_playing = True
+        self._pending_seek_pos = None
+        self._pending_was_playing = None
 
         self._player = mpv.MPV(
             wid=str(int(self.winId())),
@@ -44,6 +46,10 @@ class MpvWidget(QWidget):
             input_default_bindings=False,
             input_vo_keyboard=False,
             hwdec="auto",
+            hr_seek="yes",
+            cache="yes",
+            demuxer_max_bytes="100M",
+            demuxer_readahead_secs="30",
             volume=80,
             volume_max=130,
         )
@@ -67,11 +73,16 @@ class MpvWidget(QWidget):
 
         @self._player.event_callback("file-loaded")
         def _on_file_loaded(event):
+            # Restore seek position for any new file (FLV or DASH)
+            if self._pending_seek_pos is not None and self._player:
+                self._player.seek(self._pending_seek_pos, "absolute+exact")
+                self._pending_seek_pos = None
             if self._pending_dash_audio and self._player:
                 self._player.command("audio-add", self._pending_dash_audio, "select")
                 self._pending_dash_audio = None
-                # start property already positioned us; just restore play state
-                self._player.pause = not self._dash_was_playing
+            if self._pending_was_playing is not None:
+                self._player.pause = not self._pending_was_playing
+                self._pending_was_playing = None
 
         @self._player.event_callback("end-file")
         def _on_end(event):
@@ -105,7 +116,7 @@ class MpvWidget(QWidget):
         self._player.pause = True
         if start_pos > 0:
             self._player.wait_until_playing()
-            self._player.seek(start_pos, "absolute")
+            self._player.seek(start_pos, "absolute+exact")
 
     def replace(self, path: str):
         """Replace current file (for quality switching). Unlike load(), this stops old video."""
@@ -113,6 +124,15 @@ class MpvWidget(QWidget):
         self._player.command("stop")
         self._player.loadfile(path)
         self._player.pause = True
+
+    def replace_flv(self, path: str, seek_pos: float = 0.0, was_playing: bool = True):
+        """Non-blocking replace for FLV quality switching. Seek & play state restored via file-loaded event."""
+        self._ensure_player()
+        self._pending_dash_audio = None
+        self._pending_seek_pos = seek_pos
+        self._pending_was_playing = was_playing
+        self._player.command("stop")
+        self._player.loadfile(path)
 
     def play(self):
         if self._player:
@@ -127,22 +147,42 @@ class MpvWidget(QWidget):
             self._player.pause = not self._player.pause
 
     def load_dash(self, video_url, audio_url, resume_play=True, seek_pos=None):
-        """Load DASH video and restore play state seamlessly."""
-        if self._player:
-            # Pause first to freeze the playback position before capturing it
-            self._player.pause = True
-            if seek_pos is not None:
-                self._dash_seek_pos = seek_pos
-            else:
-                try:
-                    self._dash_seek_pos = (self._player.command("get_property", "time-pos") or 0) + 0.15
-                except Exception:
-                    self._dash_seek_pos = (self._player.time_pos or 0) + 0.15
-            self._dash_was_playing = resume_play
+        """Load DASH video seamlessly, preserving position and play state.
+
+        This is the single entry point used by all quality and page switches.
+        Position is restored via the file-loaded event callback.
+        """
+        self._ensure_player()
+        if self._player is None:
+            return
+
+        # Capture seek position
+        if seek_pos is not None:
+            self._pending_seek_pos = seek_pos
+        else:
+            try:
+                self._pending_seek_pos = max(0, (self._player.time_pos or 0) + 0.15)
+            except Exception:
+                self._pending_seek_pos = 0.0
+
+        self._pending_was_playing = resume_play
+
+        # Referer header required by Bilibili CDN
+        try:
             self._player["http-header-fields"] = "Referer: https://www.bilibili.com/"
-            self._pending_dash_audio = audio_url
-            self._player.start = self._dash_seek_pos  # start at saved position
-            self._player.loadfile(video_url)
+        except Exception:
+            pass
+
+        # Queue audio for file-loaded callback
+        self._pending_dash_audio = audio_url
+
+        # Stop then load new stream
+        try:
+            self._player.command("stop")
+        except Exception:
+            pass
+        self._player.loadfile(video_url)
+
 
     def loadfile(self, path: str):
         """Directly replace current file with new URL (for quality switching)."""
@@ -151,11 +191,11 @@ class MpvWidget(QWidget):
 
     def seek(self, position: float):
         if self._player:
-            self._player.seek(position, "absolute")
+            self._player.seek(position, "absolute+exact")
 
     def seek_relative(self, seconds: float):
         if self._player:
-            self._player.seek(seconds, "relative")
+            self._player.seek(seconds, "relative+exact")
 
     def set_volume(self, vol: int):
         if self._player:
