@@ -212,7 +212,7 @@ class RoomPanel(QWidget):
         cfg = _cfg_load()
         self._server_input.setText(cfg.get("server", "ws://localhost:9877"))
         self._name_input.setText(cfg.get("nickname", ""))
-        self._on_name_changed(cfg.get("nickname", ""))
+        self._on_name_changed()
         uname = cfg.get("bili_uname", "")
         self.set_bili_status(bool(uname), uname)
 
