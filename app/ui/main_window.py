@@ -143,7 +143,9 @@ class MainWindow(QMainWindow):
         r2.setContentsMargins(0, 0, 0, 0)
         r2.setSpacing(0)
         r2.addWidget(self._player, stretch=1)
-        r2.addWidget(self._controls)
+        # Controls float over the player instead of pushing it up
+        self._controls.setParent(right)
+        self._player_container = right
 
         s = QSplitter(Qt.Horizontal)
         s.addWidget(left)
@@ -696,6 +698,8 @@ class MainWindow(QMainWindow):
                 return True
         if obj is self._player and event.type() == QEvent.Resize:
             self._danmaku.track(self._player)
+        if hasattr(self, '_player_container') and obj is self._player_container and event.type() == QEvent.Resize:
+            self._position_controls()
         return super().eventFilter(obj, event)
 
     def _on_fullscreen(self):
@@ -712,6 +716,7 @@ class MainWindow(QMainWindow):
         self._saved_sizes = self._splitter.sizes()
         self._splitter.setSizes([0, self._splitter.width()])
         self.showFullScreen()
+        self._position_controls()
         # Force mpv to fill the entire window (fixes black bar at top on Windows)
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, lambda: self._player.update())
@@ -721,11 +726,21 @@ class MainWindow(QMainWindow):
         self._controls.show()
         self._fs_timer.stop()
         self.showNormal()
+        self._position_controls()
         # Restore splitter sizes
         if hasattr(self, '_saved_sizes'):
             self._splitter.setSizes(self._saved_sizes)
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, lambda: self._player.update())
+
+    def _position_controls(self):
+        """Position controls bar at the bottom of its parent, floating over video."""
+        if self._controls.parent():
+            pw = self._controls.parent().width()
+            ph = self._controls.parent().height()
+            ch = self._controls.sizeHint().height()
+            self._controls.setGeometry(0, ph - ch, pw, ch)
+            self._controls.raise_()
 
     def _hide_fs_controls(self):
         if self.isFullScreen():
@@ -739,7 +754,8 @@ class MainWindow(QMainWindow):
         geo = self.geometry()
         rel_y = pos.y() - geo.y()
         if rel_y > geo.height() - 60:
-            self._controls.show()
+            self._controls.show(); self._controls.raise_()
+            self._position_controls()
             self._fs_timer.start(3000)
 
     def dragEnterEvent(self, event):
