@@ -24,6 +24,8 @@ class RoomPanel(QWidget):
     leave_requested = Signal()
     chat_message = Signal(str)
     refresh_connection = Signal(str)
+    bili_login_requested = Signal()
+    bili_logout_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,6 +43,36 @@ class RoomPanel(QWidget):
         title.setAlignment(Qt.AlignCenter)
         title.setObjectName("panel_title")
         layout.addWidget(title)
+
+        # -- B站 account section --
+        bili_section = QWidget()
+        bili_section.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333;")
+        bli = QHBoxLayout(bili_section)
+        bli.setContentsMargins(8, 6, 8, 6)
+        bili_logo = QLabel("★")
+        bili_logo.setStyleSheet("color: #FB7299; font-weight: bold; font-size: 14px;")
+        bili_logo.setFixedWidth(24)
+        bli.addWidget(bili_logo)
+        bili_title = QLabel("小站账号登录")
+        bili_title.setStyleSheet("color: #aaa; font-size: 11px;")
+        bli.addWidget(bili_title)
+        bli.addStretch()
+        self._bili_status = QLabel("未登录")
+        self._bili_status.setStyleSheet("color: #888; font-size: 11px;")
+        bli.addWidget(self._bili_status)
+        self._bili_login_btn = QPushButton("登录")
+        self._bili_login_btn.setFixedSize(44, 22)
+        self._bili_login_btn.setStyleSheet("QPushButton { background-color: #FB7299; color: #fff; border-radius: 3px; font-size: 11px; } QPushButton:hover { background-color: #FC8EAC; }")
+        self._bili_login_btn.clicked.connect(self._on_bili_login)
+        bli.addWidget(self._bili_login_btn)
+        self._bili_logout_btn = QPushButton("退出")
+        self._bili_logout_btn.setFixedSize(44, 22)
+        self._bili_logout_btn.setStyleSheet("QPushButton { background-color: #555; color: #ccc; border-radius: 3px; font-size: 11px; } QPushButton:hover { background-color: #777; }")
+        self._bili_logout_btn.clicked.connect(self._on_bili_logout)
+        self._bili_logout_btn.hide()
+        bli.addWidget(self._bili_logout_btn)
+        layout.addWidget(bili_section)
+
 
         server_label = QLabel("服务器:")
         layout.addWidget(server_label)
@@ -159,10 +191,30 @@ class RoomPanel(QWidget):
     def _on_server_changed(self):
         self._save_config()
 
+    def set_bili_status(self, logged_in: bool, uname: str = ""):
+        if logged_in:
+            self._bili_status.setText(f"\u5df2\u767b\u5f55: {uname}")
+            self._bili_login_btn.hide()
+            self._bili_logout_btn.show()
+        else:
+            self._bili_status.setText("\u672a\u767b\u5f55")
+            self._bili_login_btn.show()
+            self._bili_logout_btn.hide()
+
+    def _on_bili_login(self):
+        self.bili_login_requested.emit()
+
+    def _on_bili_logout(self):
+        self.bili_logout_requested.emit()
+
+
     def _load_config(self):
         cfg = _cfg_load()
         self._server_input.setText(cfg.get("server", "ws://localhost:9877"))
         self._name_input.setText(cfg.get("nickname", ""))
+        self._on_name_changed(cfg.get("nickname", ""))
+        uname = cfg.get("bili_uname", "")
+        self.set_bili_status(bool(uname), uname)
 
     def _save_config(self):
         _cfg_save(server=self._server_input.text().strip(), nickname=self._name_input.text().strip())

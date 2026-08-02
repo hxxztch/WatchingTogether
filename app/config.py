@@ -9,7 +9,7 @@ if getattr(sys, "frozen", False):
 else:
     CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
 
-_defaults = {"server": "ws://localhost:9877", "nickname": ""}
+_defaults = {"server": "ws://localhost:9877", "nickname": "", "bili_cookie": "", "bili_uid": "", "bili_uname": ""}
 
 
 def load() -> dict:

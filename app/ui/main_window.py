@@ -96,6 +96,8 @@ class MainWindow(QMainWindow):
         self._room_panel.leave_requested.connect(self._on_leave_room)
         self._room_panel.chat_message.connect(self._on_chat)
         self._room_panel.refresh_connection.connect(self._reconnect_network)
+        self._room_panel.bili_login_requested.connect(self._on_bili_login)
+        self._room_panel.bili_logout_requested.connect(self._on_bili_logout)
 
         self._controls = ControlsBar()
         self._controls.danmaku_sent.connect(self._on_chat)
@@ -355,6 +357,20 @@ class MainWindow(QMainWindow):
         self._network.send({"type": "leave_room"})
         self._room_code = ""
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
+
+    def _on_bili_login(self):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        from app.config import save as _cfg_save
+        cookie, ok = QInputDialog.getText(self, "小站登录",
+            "输入 Cookie 或 SESSDATA:", QLineEdit.Normal, "")
+        if ok and cookie.strip():
+            _cfg_save(bili_cookie=cookie.strip(), bili_uid="", bili_uname="已登录用户")
+            self._room_panel.set_bili_status(True, "已登录用户")
+
+    def _on_bili_logout(self):
+        from app.config import save as _cfg_save
+        _cfg_save(bili_cookie="", bili_uid="", bili_uname="")
+        self._room_panel.set_bili_status(False)
 
     def _on_chat(self, text):
         if self._room_code:
