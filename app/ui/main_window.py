@@ -672,6 +672,10 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
+            # Don't steal keys from text input widgets
+            from PySide6.QtWidgets import QLineEdit
+            if QApplication.focusWidget() is not None and isinstance(QApplication.focusWidget(), QLineEdit):
+                return super().eventFilter(obj, event)
             k = event.key()
             if k == Qt.Key_Left:
                 self._player.seek_relative(-2.5)
