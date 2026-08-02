@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         self._room_panel.refresh_connection.connect(self._reconnect_network)
 
         self._controls = ControlsBar()
+        self._controls.danmaku_sent.connect(self._on_chat)
         self._controls.play_toggled.connect(self._on_toggle_play)
         self._controls.seek_requested.connect(self._on_seek)
         self._controls.volume_changed.connect(self._player_volume)
