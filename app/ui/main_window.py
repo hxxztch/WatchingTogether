@@ -359,13 +359,113 @@ class MainWindow(QMainWindow):
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
 
     def _on_bili_login(self):
-        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        """Open B站 official QR login flow."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+        from PySide6.QtCore import QTimer, Qt as _Qt
+        from PySide6.QtGui import QPixmap
         from app.config import save as _cfg_save
-        cookie, ok = QInputDialog.getText(self, "小站登录",
-            "输入 Cookie 或 SESSDATA:", QLineEdit.Normal, "")
-        if ok and cookie.strip():
-            _cfg_save(bili_cookie=cookie.strip(), bili_uid="", bili_uname="已登录用户")
-            self._room_panel.set_bili_status(True, "已登录用户")
+        import threading, time
+
+        # Step 1: get QR code from B站 API
+        try:
+            req = urllib.request.Request(
+                "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            resp = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+            if resp.get("code") != 0:
+                QMessageBox.warning(self, "登录失败", "无法获取登录二维码")
+                return
+            qr_url = resp["data"]["url"]
+            qr_key = resp["data"]["qrcode_key"]
+        except Exception as e:
+            QMessageBox.warning(self, "登录失败", str(e))
+            return
+
+        # Step 2: show QR dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("bilibili登录")
+        dlg.setFixedSize(300, 360)
+        dlg.setStyleSheet("QDialog { background-color: #2a2a2a; } QLabel { color: #e0e0e0; }")
+        dlg_layout = QVBoxLayout(dlg)
+
+        tip = QLabel("请使用 bilibili App 扫码登录")
+        tip.setAlignment(_Qt.AlignCenter)
+        tip.setStyleSheet("font-size: 14px; margin: 10px 0;")
+        dlg_layout.addWidget(tip)
+
+        # QR image via external API
+        qr_img_url = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + urllib.parse.quote(qr_url)
+        qr_data = urllib.request.urlopen(qr_img_url, timeout=10).read()
+        qr_pix = QPixmap()
+        qr_pix.loadFromData(qr_data)
+        qr_label = QLabel()
+        qr_label.setPixmap(qr_pix)
+        qr_label.setAlignment(_Qt.AlignCenter)
+        dlg_layout.addWidget(qr_label)
+
+        status_label = QLabel("等待扫码...")
+        status_label.setAlignment(_Qt.AlignCenter)
+        status_label.setStyleSheet("font-size: 12px; color: #aaa; margin: 8px 0;")
+        dlg_layout.addWidget(status_label)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dlg.reject)
+        dlg_layout.addWidget(cancel_btn)
+
+        # Step 3: poll for login result
+        stop_flag = {"stop": False}
+        login_result = {"cookie": "", "uname": ""}
+
+        def poll_loop():
+            for _ in range(60):  # 2 minutes timeout
+                if stop_flag["stop"]:
+                    return
+                try:
+                    poll_url = f"https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key={qr_key}"
+                    req2 = urllib.request.Request(poll_url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    })
+                    poll_resp = json.loads(urllib.request.urlopen(req2, timeout=5).read().decode("utf-8"))
+                    code = poll_resp.get("data", {}).get("code", -1)
+                    if code == 0:
+                        # Login success - follow redirect to get cookies
+                        redirect_url = poll_resp["data"]["url"]
+                        # Use cookie jar to capture cookies
+                        cj = urllib.request.HTTPCookieProcessor()
+                        opener = urllib.request.build_opener(cj)
+                        opener.open(urllib.request.Request(redirect_url, headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        }), timeout=10)
+                        # Build cookie string
+                        cookies = []
+                        for ck in cj.cookiejar:
+                            cookies.append(f"{ck.name}={ck.value}")
+                        login_result["cookie"] = "; ".join(cookies)
+                        login_result["uname"] = "已登录用户"
+                        dlg.accept()
+                        return
+                    elif code == 86038:
+                        status_label.setText("二维码已过期，请重新获取")
+                        return
+                    elif code == 86090:
+                        status_label.setText("已扫码，请在手机上确认...")
+                    elif code == 86101:
+                        status_label.setText("等待扫码...")
+                    else:
+                        status_label.setText(f"状态: {code}")
+                except Exception:
+                    pass
+                time.sleep(2)
+
+        thread = threading.Thread(target=poll_loop, daemon=True)
+        thread.start()
+
+        if dlg.exec() == QDialog.Accepted and login_result["cookie"]:
+            _cfg_save(bili_cookie=login_result["cookie"], bili_uid="", bili_uname=login_result["uname"])
+            self._room_panel.set_bili_status(True, login_result["uname"])
+        else:
+            stop_flag["stop"] = True
 
     def _on_bili_logout(self):
         from app.config import save as _cfg_save
