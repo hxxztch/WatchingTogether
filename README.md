@@ -131,7 +131,7 @@ film-app/
 | PySide6 | >=6.0 | Qt6 界面框架 |
 | python-mpv | >=1.0 | mpv Python 绑定 |
 | websockets | >=10.0 | 异步 WebSocket |
-| yt-dlp | 视频链接解析 |
+| yt-dlp | 最新 | 视频链接解析 |
 | browser-cookie3 | >=0.20 | 浏览器 cookie 读取 |
 
 ---
