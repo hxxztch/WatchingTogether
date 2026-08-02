@@ -36,6 +36,7 @@ class ControlsBar(QWidget):
     audio_selected = Signal(int)
     page_changed = Signal(int)
 
+    danmaku_sent = Signal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
         self._dragging_seek = False
@@ -177,6 +178,14 @@ class ControlsBar(QWidget):
         layout.addWidget(self._more_btn)
         self._rebuild_more_menu()
 
+        # -- danmaku input --
+        self._danmaku_input = QLineEdit()
+        self._danmaku_input.setFixedWidth(120)
+        self._danmaku_input.setStyleSheet("background-color: #2a2a2a; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 2px 6px; font-size: 11px;")
+        self._danmaku_input.setPlaceholderText("发个弹幕...")
+        self._danmaku_input.returnPressed.connect(self._on_danmaku)
+        layout.addWidget(self._danmaku_input)
+
         # -- fullscreen --
         fs_btn = QPushButton("\u26F6")
         fs_btn.setFixedSize(28, 28)
@@ -254,6 +263,12 @@ class ControlsBar(QWidget):
         if dlg.exec() == QDialog.Accepted and url_input.text().strip():
             self.url_submitted.emit(url_input.text().strip())
 
+
+    def _on_danmaku(self):
+        msg = self._danmaku_input.text().strip()
+        if msg:
+            self.danmaku_sent.emit(msg)
+            self._danmaku_input.clear()
     def _on_toggle_play(self):
         self.play_toggled.emit()
 
