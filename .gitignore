@@ -1,0 +1,8 @@
+﻿build/
+dist/
+pkg/
+pkg2/
+__pycache__/
+*.spec
+*.pyc
+_patch*.py
