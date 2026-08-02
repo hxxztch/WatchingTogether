@@ -24,8 +24,6 @@ class RoomPanel(QWidget):
     leave_requested = Signal()
     chat_message = Signal(str)
     refresh_connection = Signal(str)
-    bili_login_requested = Signal()
-    bili_logout_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,44 +42,7 @@ class RoomPanel(QWidget):
         title.setObjectName("panel_title")
         layout.addWidget(title)
 
-                # -- bilibili account section --
-        bili_section = QWidget()
-        bili_section.setStyleSheet("background-color: #1a1a1a; border-bottom: 1px solid #333;")
-        bv = QVBoxLayout(bili_section)
-        bv.setContentsMargins(8, 8, 8, 8)
-        bv.setSpacing(4)
-        # Logo row (centred, big)
-        bili_logo = QLabel()
-        _bp = QPixmap(_os.path.join(_BASE, "assets", "bilibililogo.png"))
-        bili_logo.setPixmap(_bp.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        bili_logo.setAlignment(Qt.AlignCenter)
-        bv.addWidget(bili_logo)
-        # Title row
-        bili_title = QLabel("bilibili登录")
-        bili_title.setAlignment(Qt.AlignCenter)
-        bili_title.setStyleSheet("color: #aaa; font-size: 12px; font-weight: bold;")
-        bv.addWidget(bili_title)
-        # Status + buttons row
-        bh = QHBoxLayout()
-        self._bili_status = QLabel("未登录")
-        self._bili_status.setStyleSheet("color: #888; font-size: 11px;")
-        bh.addWidget(self._bili_status)
-        bh.addStretch()
-        self._bili_login_btn = QPushButton("登录")
-        self._bili_login_btn.setFixedSize(50, 24)
-        self._bili_login_btn.setStyleSheet("QPushButton { background-color: #FB7299; color: #fff; border-radius: 3px; font-size: 11px; } QPushButton:hover { background-color: #FC8EAC; }")
-        self._bili_login_btn.clicked.connect(self._on_bili_login)
-        bh.addWidget(self._bili_login_btn)
-        self._bili_logout_btn = QPushButton("退出")
-        self._bili_logout_btn.setFixedSize(50, 24)
-        self._bili_logout_btn.setStyleSheet("QPushButton { background-color: #555; color: #ccc; border-radius: 3px; font-size: 11px; } QPushButton:hover { background-color: #777; }")
-        self._bili_logout_btn.clicked.connect(self._on_bili_logout)
-        self._bili_logout_btn.hide()
-        bh.addWidget(self._bili_logout_btn)
-        bv.addLayout(bh)
-        layout.addWidget(bili_section)
-
-
+                
         server_label = QLabel("服务器:")
         layout.addWidget(server_label)
         self._server_input = QLineEdit()
@@ -193,7 +154,7 @@ class RoomPanel(QWidget):
     def update_server_label(self, url: str):
         self._current_server.setText(f"当前服务器: {url}")
 
-    def _on_name_changed(self):
+    def _on_name_changed(self, text=None):
         self._save_config()
 
     def _on_server_changed(self):
@@ -221,8 +182,6 @@ class RoomPanel(QWidget):
         self._server_input.setText(cfg.get("server", "ws://localhost:9877"))
         self._name_input.setText(cfg.get("nickname", ""))
         self._on_name_changed()
-        uname = cfg.get("bili_uname", "")
-        self.set_bili_status(bool(uname), uname)
 
     def _save_config(self):
         _cfg_save(server=self._server_input.text().strip(), nickname=self._name_input.text().strip())

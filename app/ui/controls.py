@@ -4,6 +4,15 @@ from PySide6.QtWidgets import (
     QFileDialog, QLineEdit, QComboBox, QMenu, QFrame, QDialog, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QEvent
+from PySide6.QtWidgets import QStyle, QStyleOptionSlider
+from PySide6.QtGui import QPixmap, QCursor
+import os as _os, sys as _sys
+
+if getattr(_sys, "frozen", False):
+    _B = _sys._MEIPASS
+else:
+    _B = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+_BILI_LOGO = _os.path.join(_B, "assets", "bilibililogo.png")
 
 MENU_STYLE = """
 QMenu {
@@ -37,6 +46,10 @@ class ControlsBar(QWidget):
     page_changed = Signal(int)
 
     danmaku_sent = Signal(str)
+
+    bili_login_requested = Signal()
+    bili_logout_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._dragging_seek = False
@@ -47,6 +60,9 @@ class ControlsBar(QWidget):
         self._page_list = []
         self._quality_list = []
         self._current_quality = ""
+        self._bili_logged_in = False
+        self._bili_uname = ""
+
         self._setup_ui()
 
     # ================================================================
@@ -100,6 +116,7 @@ class ControlsBar(QWidget):
         self._seek_bar.setValue(0)
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
+        self._seek_bar.installEventFilter(self)
         layout.addWidget(self._seek_bar, stretch=1)
 
         # -- danmaku input --
@@ -156,6 +173,9 @@ class ControlsBar(QWidget):
         self._vol_slider_v.valueChanged.connect(self._on_volume)
         vlay.addWidget(self._vol_slider_v)
 
+        self._vol_hide_timer = QTimer(self)
+        self._vol_hide_timer.timeout.connect(self._vol_hide_check)
+
         layout.addWidget(vol_frame)
 
         # -- quality --
@@ -206,18 +226,38 @@ class ControlsBar(QWidget):
     #  event filter (volume popup)
     # ================================================================
     def eventFilter(self, obj, event):
-        if obj == self._vol_btn:
+        if obj == self._seek_bar and event.type() == QEvent.MouseButtonPress:
+            # Check if clicking on handle (allow drag) or track (click-to-seek)
+            pos_x = event.position().x()
+            opt = QStyleOptionSlider()
+            self._seek_bar.initStyleOption(opt)
+            handle_rect = self._seek_bar.style().subControlRect(
+                QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self._seek_bar)
+            margin = 8  # px tolerance around handle for drag
+            handle_rect = handle_rect.adjusted(-margin, -margin, margin, margin)
+            if handle_rect.contains(int(pos_x), handle_rect.center().y()):
+                # Click near handle - let slider handle dragging natively
+                return False
+            # Click on track - do click-to-seek
+            if self._duration > 0:
+                val = QStyle.sliderValueFromPosition(
+                    self._seek_bar.minimum(), self._seek_bar.maximum(),
+                    int(pos_x), self._seek_bar.width())
+                self._seek_bar.setValue(val)
+                pos = val / 1000.0 * self._duration
+                self.seek_requested.emit(pos)
+            return True
+        if hasattr(self, '_vol_btn') and obj == self._vol_btn:
             if event.type() == QEvent.Enter:
-                self._show_vol_popup()
-                return True
-            elif event.type() == QEvent.Leave:
-                QTimer.singleShot(200, self._check_vol_popup_hide)
-                return True
+                if not self._vol_popup.isVisible():
+                    self._show_vol_popup()
+                self._vol_hide_timer.start(500)
             return False
         if hasattr(self, "_vol_popup") and obj == self._vol_popup:
-            if event.type() == QEvent.Leave:
-                self._vol_popup.hide()
-                return True
+            if event.type() == QEvent.Enter:
+                self._vol_hide_timer.stop()
+            elif event.type() == QEvent.Leave:
+                self._vol_hide_timer.start(500)
         return super().eventFilter(obj, event)
 
     def _show_vol_popup(self):
@@ -225,9 +265,13 @@ class ControlsBar(QWidget):
         self._vol_popup.move(pos.x(), pos.y() - self._vol_popup.height())
         self._vol_popup.show()
 
-    def _check_vol_popup_hide(self):
-        if not self._vol_popup.underMouse() and not self._vol_btn.underMouse():
+    def _vol_hide_check(self):
+        gpos = self.mapFromGlobal(QCursor.pos()) if hasattr(self, 'mapFromGlobal') else QCursor.pos()
+        in_btn = self._vol_btn.rect().contains(self._vol_btn.mapFromGlobal(QCursor.pos()))
+        in_popup = self._vol_popup.isVisible() and self._vol_popup.rect().contains(self._vol_popup.mapFromGlobal(QCursor.pos()))
+        if not in_btn and not in_popup:
             self._vol_popup.hide()
+            self._vol_hide_timer.stop()
 
     # ================================================================
     #  button actions
@@ -258,6 +302,9 @@ class ControlsBar(QWidget):
             "border: 1px solid #555; border-radius: 3px; padding: 6px 8px; }"
         )
         lay.addWidget(url_input)
+        login_hint = QLabel("在其他功能中登录bilibili账号以获取更高的B站视频清晰度")
+        login_hint.setStyleSheet("color: #888; font-size: 11px;")
+        lay.addWidget(login_hint)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.setStyleSheet(
             "QPushButton { padding: 4px 16px; }"
@@ -292,14 +339,17 @@ class ControlsBar(QWidget):
     def _on_vol_toggle(self):
         if self._muted:
             self._muted = False
-            self._vol_slider_v.setValue(self._vol_before_mute)
-            self.volume_changed.emit(self._vol_before_mute)
+            vol = self._vol_before_mute if self._vol_before_mute > 0 else 80
+            self._vol_slider_v.setValue(vol)
+            self.volume_changed.emit(vol)
+            self._update_vol_icon(vol)
         else:
+            cur = self._vol_slider_v.value()
+            self._vol_before_mute = cur if cur > 0 else 80
             self._muted = True
-            self._vol_before_mute = self._vol_slider_v.value()
             self._vol_slider_v.setValue(0)
             self.volume_changed.emit(0)
-        self._update_vol_icon(self._vol_slider_v.value())
+            self._update_vol_icon(0)
 
     def _update_vol_icon(self, vol):
         if vol == 0:
@@ -319,6 +369,13 @@ class ControlsBar(QWidget):
     def _rebuild_more_menu(self):
         self._more_menu.clear()
 
+
+        # Bilibili login
+        bili_text = "登录bilibili"
+        if self._bili_logged_in:
+            bili_text += " (已登录)"
+        self._more_menu.addAction(bili_text, self._on_bili_menu)
+        self._more_menu.addSeparator()
         # Audio
         a_m = self._more_menu.addMenu("\u97F3\u8F68")
         if self._audio_tracks:
@@ -391,6 +448,54 @@ class ControlsBar(QWidget):
         d_m = int(duration // 60) if duration > 0 else 0
         d_s = int(duration % 60) if duration > 0 else 0
         self._time_label.setText(f"{p_m:02d}:{p_s:02d} / {d_m:02d}:{d_s:02d}")
+
+
+    # ================================================================
+    #  bilibili login dialog
+    # ================================================================
+    def set_bili_status(self, logged_in, uname=""):
+        self._bili_logged_in = logged_in
+        self._bili_uname = uname
+        self._rebuild_more_menu()
+
+    def _on_bili_menu(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("bilibili登录")
+        dlg.setFixedSize(300, 250)
+        dlg.setStyleSheet("QDialog { background-color: #1a1a1a; }")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+        # Logo
+        logo = QLabel()
+        if _os.path.exists(_BILI_LOGO):
+            pm = QPixmap(_BILI_LOGO)
+            logo.setPixmap(pm.scaledToWidth(160, Qt.SmoothTransformation))
+        logo.setAlignment(Qt.AlignCenter)
+        lay.addWidget(logo)
+        # Status label
+        status_text = "已登录: " + self._bili_uname if self._bili_logged_in else "未登录"
+        status_label = QLabel(status_text)
+        status_label.setAlignment(Qt.AlignCenter)
+        status_label.setStyleSheet("color: #aaa; font-size: 12px;")
+        lay.addWidget(status_label)
+        lay.addStretch()
+        # Buttons
+        if self._bili_logged_in:
+            logout_btn = QPushButton("退出登录")
+            logout_btn.setStyleSheet("QPushButton { background-color: #c0392b; color: #fff; border-radius: 3px; padding: 6px 16px; font-size: 12px; } QPushButton:hover { background-color: #e74c3c; }")
+            logout_btn.clicked.connect(lambda: (self.bili_logout_requested.emit(), dlg.accept()))
+            lay.addWidget(logout_btn)
+        else:
+            login_btn = QPushButton("登录")
+            login_btn.setStyleSheet("QPushButton { background-color: #FB7299; color: #fff; border-radius: 3px; padding: 6px 16px; font-size: 12px; } QPushButton:hover { background-color: #FC8EAC; }")
+            login_btn.clicked.connect(lambda: (self.bili_login_requested.emit(), dlg.accept()))
+            lay.addWidget(login_btn)
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet("QPushButton { background-color: #444; color: #ccc; border-radius: 3px; padding: 6px 16px; font-size: 12px; } QPushButton:hover { background-color: #555; }")
+        close_btn.clicked.connect(dlg.reject)
+        lay.addWidget(close_btn)
+        dlg.exec()
 
     def set_volume(self, vol: int):
         self._vol_slider_v.blockSignals(True)
