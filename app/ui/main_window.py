@@ -452,28 +452,38 @@ class MainWindow(QMainWindow):
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
 
     def _on_bili_login(self):
-        """Open bilibili login in browser, poll Chrome/Edge cookies, auto-detect."""
+        """Bilibili QR login via API: generate QR, poll scan, exchange for SESSDATA."""
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
         from PySide6.QtCore import Qt, QTimer
+        from PySide6.QtGui import QPixmap
         from app.config import save as _cfg_save
-        import webbrowser, json as _json, urllib.request as _ur
+        import json as _json, urllib.request as _ur, io, re, threading, time
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("bilibili登录")
-        dlg.setFixedSize(360, 160)
+        dlg.setWindowTitle("bilibili\u767b\u5f55")
+        dlg.setFixedSize(360, 420)
         dlg.setStyleSheet("QDialog { background-color: #1a1a1a; }")
         lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(12)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(10)
 
-        hint = QLabel(
-            "已在浏览器中打开 bilibili 登录页\n完成登录后关闭浏览器\n软件会自动检测登录状态"
-        )
+        hint = QLabel("\u8bf7\u7528 bilibili APP \u626b\u63cf\u4e0b\u65b9\u4e8c\u7ef4\u7801\u767b\u5f55")
         hint.setAlignment(Qt.AlignCenter)
         hint.setStyleSheet("color: #e0e0e0; font-size: 13px;")
         lay.addWidget(hint)
 
-        cancel_btn = QPushButton("取消")
+        qr_label = QLabel()
+        qr_label.setAlignment(Qt.AlignCenter)
+        qr_label.setMinimumSize(260, 260)
+        qr_label.setStyleSheet("background-color: white; border-radius: 4px; padding: 8px;")
+        lay.addWidget(qr_label)
+
+        status_lbl = QLabel("\u751f\u6210\u4e8c\u7ef4\u7801\u4e2d...")
+        status_lbl.setAlignment(Qt.AlignCenter)
+        status_lbl.setStyleSheet("color: #888; font-size: 12px;")
+        lay.addWidget(status_lbl)
+
+        cancel_btn = QPushButton("\u53d6\u6d88")
         cancel_btn.setStyleSheet(
             "QPushButton { background-color: #444; color: #ccc; border-radius: 3px; "
             "padding: 8px 16px; font-size: 13px; } "
@@ -482,84 +492,190 @@ class MainWindow(QMainWindow):
         cancel_btn.clicked.connect(dlg.reject)
         lay.addWidget(cancel_btn)
 
-        webbrowser.open("https://passport.bilibili.com/login")
+        _state = {"qrcode_key": None, "done": False, "polls": 0, "scan_seen": False,
+                  "exchanging": False, "exchange_done": False, "result": None}
 
-        poll_count = {"n": 0}
-        max_polls = 60  # ~90 seconds
-
-        def _poll():
-            poll_count["n"] += 1
-            dots = "." * ((poll_count["n"] % 4) + 1)
-            hint.setText(
-                "已在浏览器中打开 bilibili 登录页\n正在等待登录" + dots
-            )
-
-            sessdata = self._find_bili_cookie()
-            if sessdata:
-                ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        def _qr_api_request(url, timeout=10):
+            """Make API request with retry."""
+            last_err = None
+            for attempt in range(3):
                 try:
-                    req = _ur.Request(
-                        "https://api.bilibili.com/x/web-interface/nav",
-                        headers={
-                            "User-Agent": ua,
-                            "Referer": "https://www.bilibili.com/",
-                            "Cookie": "SESSDATA=" + sessdata,
-                        },
-                    )
-                    resp = _json.loads(
-                        _ur.urlopen(req, timeout=10).read().decode("utf-8")
-                    )
-                    if resp.get("code") == 0 and resp.get("data", {}).get("isLogin"):
-                        uname = resp["data"]["uname"]
-                        uid = resp["data"]["mid"]
-                        _cfg_save(
-                            bili_cookie="SESSDATA=" + sessdata,
-                            bili_uid=str(uid),
-                            bili_uname=uname,
-                        )
-                        self._controls.set_bili_status(True, uname)
-                        self._room_panel.set_status(
-                            "bilibili登录成功: " + uname, "#4CAF50"
-                        )
-                        _timer.stop()
-                        dlg.accept()
-                        return
-                except Exception:
-                    pass
+                    req = _ur.Request(url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Referer": "https://www.bilibili.com/",
+                    })
+                    return _ur.urlopen(req, timeout=timeout)
+                except Exception as e:
+                    last_err = e
+                    if attempt < 2:
+                        time.sleep(1)
+            raise last_err
 
-            if poll_count["n"] >= max_polls:
-                _timer.stop()
-                self._room_panel.set_status(
-                    "bilibili登录超时未检测到登录", "#f44336"
+        def _gen_and_show_qr():
+            try:
+                resp_data = _qr_api_request(
+                    "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+                ).read().decode("utf-8")
+                resp = _json.loads(resp_data)
+                if resp.get("code") != 0:
+                    status_lbl.setText("\u4e8c\u7ef4\u7801\u751f\u6210\u5931\u8d25")
+                    return False
+                _state["qrcode_key"] = resp["data"]["qrcode_key"]
+                _state["polls"] = 0
+                _state["scan_seen"] = False
+                _state["exchanging"] = False
+                _state["exchange_done"] = False
+                _state["result"] = None
+                try:
+                    import segno
+                    qr = segno.make(resp["data"]["url"], error="m")
+                    buf = io.BytesIO()
+                    qr.save(buf, kind="png", scale=8, border=2)
+                    buf.seek(0)
+                except ImportError:
+                    import qrcode as _qr
+                    qr = _qr.QRCode(version=None, error_correction=_qr.constants.ERROR_CORRECT_M, box_size=8, border=2)
+                    qr.add_data(resp["data"]["url"])
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    buf = io.BytesIO()
+                    img.save(buf, "PNG")
+                    buf.seek(0)
+                pix = QPixmap()
+                pix.loadFromData(buf.read())
+                qr_label.setPixmap(pix.scaled(260, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                status_lbl.setText("\u7b49\u5f85\u626b\u7801...")
+                return True
+            except Exception as e:
+                err_msg = str(e)[:50]
+                logging.warning("Bili QR gen error: %s", e)
+                status_lbl.setText("\u7f51\u7edc\u8fde\u63a5\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u6216VPN\u8bbe\u7f6e")
+                QTimer.singleShot(5000, _gen_and_show_qr)
+                return False
+
+        def _do_exchange_and_verify(cross_url):
+            """Run in background thread: exchange ticket for SESSDATA, then verify."""
+            import http.cookiejar
+            result = {"success": False, "uname": "", "error": ""}
+            try:
+                cj = http.cookiejar.CookieJar()
+                opener = _ur.build_opener(_ur.HTTPCookieProcessor(cj))
+                req = _ur.Request(cross_url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://www.bilibili.com/",
+                })
+                opener.open(req, timeout=8)
+                sessdata = None
+                for cookie in cj:
+                    if cookie.name == "SESSDATA":
+                        sessdata = cookie.value
+                        break
+                if not sessdata:
+                    result["error"] = "no_sessdata"
+                    _state["exchange_done"] = True
+                    _state["result"] = result
+                    return
+
+                req2 = _ur.Request(
+                    "https://api.bilibili.com/x/web-interface/nav",
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                             "Referer": "https://www.bilibili.com/",
+                             "Cookie": "SESSDATA=" + sessdata},
                 )
-                dlg.reject()
+                resp2 = _json.loads(_ur.urlopen(req2, timeout=10).read().decode("utf-8"))
+                if resp2.get("code") == 0 and resp2.get("data", {}).get("isLogin"):
+                    result["success"] = True
+                    result["uname"] = resp2["data"]["uname"]
+                    result["uid"] = resp2["data"]["mid"]
+                    result["sessdata"] = sessdata
+                else:
+                    result["error"] = "verify_failed"
+            except Exception as e:
+                result["error"] = str(e)
 
-        _timer = QTimer(dlg)
-        _timer.timeout.connect(_poll)
-        _timer.start(1500)
+            _state["exchange_done"] = True
+            _state["result"] = result
 
-        dlg.finished.connect(lambda _: _timer.stop())
+        def _poll_scan():
+            if _state["exchanging"]:
+                if _state["exchange_done"] and _state["result"] is not None:
+                    _state["exchanging"] = False
+                    _state["done"] = True
+                    r = _state["result"]
+                    if r["success"]:
+                        _cfg_save(
+                            bili_cookie="SESSDATA=" + r["sessdata"],
+                            bili_uid=str(r["uid"]),
+                            bili_uname=r["uname"],
+                        )
+                        self._controls.set_bili_status(True, r["uname"])
+                        self._room_panel.set_status(
+                            "bilibili\u767b\u5f55\u6210\u529f: " + r["uname"], "#4CAF50")
+                        dlg.accept()
+                    else:
+                        status_lbl.setText("\u767b\u5f55\u5931\u8d25\uff0c\u91cd\u65b0\u751f\u6210...")
+                        _state["qrcode_key"] = None
+                        _state["done"] = False
+                        _state["exchanging"] = False
+                        _state["exchange_done"] = False
+                        _state["result"] = None
+                        QTimer.singleShot(200, _gen_and_show_qr)
+                return
+
+            if _state["done"] or not _state["qrcode_key"]:
+                return
+            _state["polls"] += 1
+            try:
+                resp_data = _qr_api_request(
+                    "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+                    "?qrcode_key=" + _state["qrcode_key"]
+                ).read().decode("utf-8")
+                resp = _json.loads(resp_data)
+                code = resp.get("data", {}).get("code", -1)
+                if code == 0:
+                    cross_url = resp["data"]["url"]
+                    status_lbl.setText("\u767b\u5f55\u6210\u529f\uff0c\u83b7\u53d6\u4fe1\u606f\u4e2d...")
+                    _state["exchanging"] = True
+                    _state["exchange_done"] = False
+                    _state["result"] = None
+                    threading.Thread(target=lambda u=cross_url: _do_exchange_and_verify(u), daemon=True).start()
+                elif code == 86090:
+                    if not _state["scan_seen"]:
+                        _state["scan_seen"] = True
+                        _poll_timer.setInterval(300)
+                    status_lbl.setText("\u5df2\u626b\u7801\uff0c\u8bf7\u5728 APP \u4e2d\u786e\u8ba4")
+                elif code == 86038:
+                    status_lbl.setText("\u4e8c\u7ef4\u7801\u8fc7\u671f\uff0c\u91cd\u65b0\u751f\u6210...")
+                    _state["qrcode_key"] = None
+                    QTimer.singleShot(200, _gen_and_show_qr)
+                elif code == 86101:
+                    pass
+            except Exception as e:
+                logging.warning("Bili poll error: %s", e)
+                if _state["polls"] >= 5:
+                    status_lbl.setText("\u7f51\u7edc\u9519\u8bef\uff0c\u6b63\u5728\u91cd\u8bd5...")
+
+            if _state["polls"] >= 180:
+                status_lbl.setText("\u767b\u5f55\u8d85\u65f6")
+                _state["done"] = True
+
+        if _gen_and_show_qr():
+            _poll_timer = QTimer(dlg)
+            _poll_timer.timeout.connect(_poll_scan)
+            _poll_timer.start(1000)
+        else:
+            _poll_timer = QTimer(dlg)
+            _poll_timer.timeout.connect(lambda: None)
+
+        def _on_finished():
+            _state["done"] = True
+            _state["exchanging"] = False
+            try:
+                _poll_timer.stop()
+            except Exception:
+                pass
+        dlg.finished.connect(_on_finished)
         dlg.exec()
-
-
-
-
-    def _find_bili_cookie(self):
-        """Find bilibili SESSDATA from Chrome / Edge cookie stores."""
-        try:
-            import browser_cookie3
-            for name in ["chrome", "edge", "chromium"]:
-                try:
-                    cj = getattr(browser_cookie3, name)(domain_name="bilibili.com")
-                    for c in cj:
-                        if c.name == "SESSDATA" and c.value:
-                            return c.value
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        return None
-
     def _on_bili_logout(self):
         from app.config import save as _cfg_save
         _cfg_save(bili_cookie="", bili_uid="", bili_uname="")

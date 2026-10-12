@@ -1,10 +1,14 @@
 ﻿build/
 dist/
+build_*/
+dist_*/
 pkg/
 pkg2/
 __pycache__/
 *.spec
+!build_client_1.3.1.spec
 *.pyc
 _patch*.py
 crash.log
 vc_redist.x64.exe
+config.json

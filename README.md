@@ -22,7 +22,7 @@
 | 房间同步 | 创建/加入房间，播放进度实时同步 |
 | 播放控制 | 播放、暂停、进度条跳转、音量调节、全屏 |
 | B站视频 | 直接粘贴视频网页链接播放，支持分P切换、画质切换 |
-| B站登录 | 弹出浏览器完成官方登录，自动获取 cookie，解锁高清晰度 |
+| B站登录 | 在应用内显示二维码，使用 bilibili APP 扫码确认登录，获取账号可用的清晰度 |
 | 音轨切换 | 多音轨视频可自由切换音频轨道 |
 | 弹幕聊天 | 边看边聊|
 | 快捷键 | 空格暂停/播放（同步）、左右方向键快进快退（同步） |
@@ -43,7 +43,7 @@
 ### 安装依赖
 
 ```bash
-pip install PySide6 python-mpv websockets yt-dlp browser-cookie3
+pip install -r requirements.txt
 ```
 
 ### 启动服务端
@@ -64,6 +64,8 @@ ngrok 会提供一个公网地址（例如 `https://xxx.ngrok-free.dev`），将
 
 启动客户端后，在界面左上角输入服务器地址（如 `wss://xxx.ngrok-free.dev`）和昵称，点击"连接"即可。
 
+点击 B站登录后，使用 bilibili APP 扫描应用内二维码并确认登录。登录状态与连接设置保存在本地 `config.json` 中；该文件由程序自动保存，不纳入 Git 版本管理。
+
 ### 启动客户端
 
 ```bash
@@ -77,7 +79,7 @@ film-app/
 ├── server.py               # WebSocket 服务端：房间管理、播放同步广播
 ├── client.py               # 客户端入口
 ├── requirements.txt        # Python 依赖
-├── build_client_v3.spec    # PyInstaller 打包配置
+├── build_client_1.3.1.spec  # 1.3.1 客户端 PyInstaller 打包配置
 ├── 更新日志.txt             # 版本更新记录
 │
 ├── app/                    # 客户端核心模块
@@ -118,7 +120,7 @@ film-app/
 | mpv + python-mpv | 高性能视频播放（GPU 硬解） |
 | PySide6 (Qt6) | 跨平台桌面 UI 框架 |
 | yt-dlp | B站视频链接解析与流媒体提取 |
-| browser-cookie3 | 读取浏览器 B站 cookie 实现登录 |
+| segno | 生成 B站登录二维码 |
 | ngrok | 内网穿透，公网访问 |
 | B站 API (WBI) | 在线视频清晰度列表与播放地址获取 |
 
@@ -132,7 +134,7 @@ film-app/
 | python-mpv | >=1.0 | mpv Python 绑定 |
 | websockets | >=10.0 | 异步 WebSocket |
 | yt-dlp | 最新 | 视频链接解析 |
-| browser-cookie3 | >=0.20 | 浏览器 cookie 读取 |
+| segno | — | 登录二维码生成 |
 
 ---
 
