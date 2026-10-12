@@ -1,226 +1,322 @@
 #!/usr/bin/env python3
-"""WebSocket server for xiangjian-guanying - handles rooms and playback sync."""
+"""Room server with resumable sessions and an authoritative playback timeline."""
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict, deque
 import json
-import random
 import logging
-from typing import Dict, List, Optional
+import math
+import random
+import secrets
+import time
+
 from websockets.asyncio.server import serve
+from websockets.exceptions import ConnectionClosed
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
 log = logging.getLogger("server")
 
 
+class Peer:
+    """A bounded, independent outbox keeps a slow socket off the room's path."""
+
+    def __init__(self, ws, limit=128, send_timeout=5):
+        self.ws = ws
+        self.protocol = 1
+        self.queue = deque()
+        self.wakeup = asyncio.Event()
+        self.limit = limit
+        self.send_timeout = send_timeout
+        self.failed = False
+
+    def send(self, message):
+        if self.failed:
+            return
+        # Only unsolicited snapshots are coalesced; replies and chat stay ordered.
+        if message.get("type") == "sync_state" and not message.get("request_id"):
+            self.queue = deque(item for item in self.queue
+                               if item.get("type") != "sync_state" or item.get("request_id"))
+        if len(self.queue) >= self.limit:
+            self.failed = True
+        else:
+            self.queue.append(message)
+        self.wakeup.set()
+
+    async def run(self):
+        while True:
+            await self.wakeup.wait()
+            if self.failed:
+                raise ConnectionError("Client output queue is full")
+            while self.queue:
+                if self.failed:
+                    raise ConnectionError("Client output queue is full")
+                message = self.queue.popleft()
+                await asyncio.wait_for(
+                    self.ws.send(json.dumps(message, ensure_ascii=False)), self.send_timeout)
+            self.wakeup.clear()
+
+
+class Member:
+    def __init__(self, name, peer):
+        self.name = name
+        self.token = secrets.token_urlsafe(32)
+        self.peer = peer
+        self.expires = None
+        self.seen = OrderedDict()
+        self.seen_chats = OrderedDict()
+
+
 class Room:
-    """A watching room containing connected clients and current playback state."""
-
-    def __init__(self, code: str):
+    def __init__(self, code):
         self.code = code
-        self.clients: Dict[str, object] = {}
-        self.state = {
-            "playing": False,
-            "position": 0.0,
-            "path": "",
-            "paused_at": 0.0,
-        }
+        self.members = {}
+        self.position = 0.0
+        self.playing = False
+        self.updated_at = time.monotonic()
+        self.version = 0
+        self.chat_seq = 0
+        self.history = deque(maxlen=100)
 
     @property
-    def member_count(self) -> int:
-        return len(self.clients)
+    def member_names(self):
+        return [member.name for member in self.members.values() if member.peer is not None]
 
-    @property
-    def member_names(self) -> List[str]:
-        return list(self.clients.keys())
+    def snapshot(self):
+        now = time.monotonic()
+        position = self.position + (now - self.updated_at if self.playing else 0)
+        return {"position": position, "playing": self.playing,
+                "version": self.version, "server_time": now}
+
+    def update(self, position, playing):
+        self.position = max(0.0, position)
+        self.playing = playing
+        self.updated_at = time.monotonic()
+        self.version += 1
 
 
 class Server:
-    def __init__(self):
-        self.rooms: Dict[str, Room] = {}
+    def __init__(self, grace_period=60):
+        self.rooms = {}
+        self.grace_period = grace_period
+        self._maintenance = None
 
-    def _generate_code(self) -> str:
+    async def __aenter__(self):
+        self._maintenance = asyncio.create_task(self._maintain())
+        return self
+
+    async def __aexit__(self, *args):
+        self._maintenance.cancel()
+        await asyncio.gather(self._maintenance, return_exceptions=True)
+
+    def _expire(self):
+        now = time.monotonic()
+        for code, room in list(self.rooms.items()):
+            for token, member in list(room.members.items()):
+                if member.peer is None and member.expires is not None and member.expires <= now:
+                    del room.members[token]
+            if not room.members:
+                del self.rooms[code]
+
+    async def _maintain(self):
+        while True:
+            self._expire()
+            await asyncio.sleep(1)
+
+    def _generate_code(self):
         for _ in range(100):
             code = f"{random.randint(0, 9999):04d}"
             if code not in self.rooms:
                 return code
-        raise RuntimeError("No available room codes")
+        raise ValueError("No available room codes")
 
-    async def broadcast(self, room: Room, msg: dict, exclude: Optional[str] = None):
-        data = json.dumps(msg, ensure_ascii=False)
-        tasks = []
-        for name, ws in room.clients.items():
-            if name != exclude:
-                tasks.append(asyncio.create_task(ws.send(data)))
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+    def broadcast(self, room, message, exclude=None):
+        for member in list(room.members.values()):
+            if member.peer is not None and member is not exclude:
+                member.peer.send(message)
+
+    def _detach(self, room, member, peer, intentional=False):
+        # An old connection's finally must not remove its resumed replacement.
+        if room is None or member is None or member.peer is not peer:
+            return
+        member.peer = None
+        if intentional:
+            room.members.pop(member.token, None)
+        else:
+            member.expires = time.monotonic() + self.grace_period
+        self.broadcast(room, {"type": "member_left", "name": member.name,
+                              "members": room.member_names})
+        if not room.members:
+            self.rooms.pop(room.code, None)
+
+    @staticmethod
+    def _position(value):
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("Position must be finite")
+        return max(0.0, value)
 
     async def handle(self, ws):
-        client_name = ""
-        current_room: Optional[Room] = None
+        peer = Peer(ws)
+        peer.send({"type": "hello", "protocol": 2})
+        reader = asyncio.create_task(self._receive(peer))
+        writer = asyncio.create_task(peer.run())
+        try:
+            done, _ = await asyncio.wait([reader, writer], return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        except (ConnectionClosed, ConnectionError, asyncio.TimeoutError) as exc:
+            log.info("Connection ended: %s", type(exc).__name__)
+        finally:
+            reader.cancel()
+            writer.cancel()
+            await asyncio.gather(reader, writer, return_exceptions=True)
+            await ws.close()
 
-        async for raw in ws:
-            try:
-                msg = json.loads(raw)
-                mtype = msg.get("type", "")
-            except json.JSONDecodeError:
-                await ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
-                continue
-
-            try:
-                if mtype == "create_room":
-                    code = self._generate_code()
-                    name = msg.get("name", "Host").strip()
-                    current_room = Room(code)
-                    self.rooms[code] = current_room
-                    client_name = name
-                    current_room.clients[name] = ws
-                    log.info(f"Room {code} created by {name}")
-                    await ws.send(json.dumps({"type": "room_created", "room": code, "members": current_room.member_names}))
-
-                elif mtype == "join_room":
-                    code = msg.get("room", "")
-                    name = msg.get("name", "Anonymous").strip()
-                    if not code or code not in self.rooms:
-                        await ws.send(json.dumps({"type": "error", "message": "Room not found"}))
+    async def _receive(self, peer):
+        room = member = None
+        try:
+            async for raw in peer.ws:
+                msg = None
+                try:
+                    msg = json.loads(raw)
+                    if not isinstance(msg, dict):
+                        raise ValueError("Message must be an object")
+                    mtype = msg.get("type")
+                    if mtype in ("create_room", "join_room", "resume_room"):
+                        self._expire()
+                        if member is not None:
+                            raise ValueError("Leave the current room first")
+                        peer.protocol = 2 if msg.get("protocol") == 2 else 1
+                        if mtype == "resume_room":
+                            candidate = self.rooms.get(msg.get("room"))
+                            restored = candidate.members.get(msg.get("token")) if candidate else None
+                            if restored is None:
+                                peer.send({"type": "session_expired",
+                                           "message": "Room session expired or server restarted"})
+                                continue
+                            cursor = max(0, min(candidate.chat_seq, int(msg.get("chat_seq", 0))))
+                            room, member = candidate, restored
+                            old_peer = member.peer
+                            member.peer = peer
+                            member.expires = None
+                            if old_peer is not None and old_peer is not peer:
+                                old_peer.failed = True
+                                old_peer.wakeup.set()
+                        else:
+                            name = str(msg.get("name", "")).strip()[:64] or "Anonymous"
+                            if mtype == "create_room":
+                                room = Room(self._generate_code())
+                                self.rooms[room.code] = room
+                            else:
+                                room = self.rooms.get(msg.get("room"))
+                                if room is None:
+                                    raise ValueError("Room not found")
+                            base, suffix = name, 1
+                            names = {item.name for item in room.members.values()}
+                            while name in names:
+                                name = f"{base}_{suffix}"
+                                suffix += 1
+                            member = Member(name, peer)
+                            room.members[member.token] = member
+                            cursor = room.chat_seq
+                        peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
+                                   "room": room.code, "name": member.name,
+                                   "token": member.token, "protocol": 2,
+                                   "chat_seq": cursor,
+                                   "resumed": mtype == "resume_room", "members": room.member_names,
+                                   "state": room.snapshot()})
+                        if mtype == "resume_room":
+                            if room.history and cursor < room.history[0][1]["seq"] - 1:
+                                peer.send({"type": "delivery_failed",
+                                           "message": "离线期间聊天过多，仅恢复最近100条记录"})
+                            for sender_token, event in room.history:
+                                if event["seq"] > cursor and sender_token != member.token:
+                                    peer.send(event)
+                        self.broadcast(room, {"type": "member_joined", "name": member.name,
+                                              "members": room.member_names}, exclude=member)
                         continue
-                    room = self.rooms[code]
-                    if name in room.clients:
-                        name = f"{name}_{len(room.clients)}"
-                    client_name = name
-                    current_room = room
-                    room.clients[name] = ws
-                    log.info(f"{name} joined room {code}")
-                    await ws.send(json.dumps({
-                        "type": "room_joined",
-                        "room": code,
-                        "name": name,
-                        "members": room.member_names,
-                        "state": {"playing": room.state["playing"], "position": room.state["position"]},
-                    }))
-                    await self.broadcast(room, {
-                        "type": "member_joined",
-                        "name": name,
-                        "members": room.member_names,
-                    }, exclude=name)
 
-                elif mtype == "leave_room":
-                    if current_room and client_name in current_room.clients:
-                        del current_room.clients[client_name]
-                        log.info(f"{client_name} left room {current_room.code}")
-                        members = current_room.member_names
-                        await self.broadcast(current_room, {
-                            "type": "member_left",
-                            "name": client_name,
-                            "members": members,
-                        })
-                        if current_room.member_count == 0:
-                            del self.rooms[current_room.code]
-                            log.info(f"Room {current_room.code} closed (empty)")
-                    current_room = None
-                    client_name = ""
-                    await ws.send(json.dumps({"type": "left_room"}))
+                    if mtype == "leave_room":
+                        self._detach(room, member, peer, intentional=True)
+                        room = member = None
+                        peer.send({"type": "left_room"})
+                        continue
+                    if member is None or member.peer is not peer:
+                        raise ValueError("Join a room first")
+                    message_id = msg.get("id")
+                    if message_id is not None and (not isinstance(message_id, str) or len(message_id) > 64):
+                        raise ValueError("Invalid message ID")
+                    seen = member.seen_chats if mtype == "chat" else member.seen
+                    if message_id and message_id in seen:
+                        peer.send({"type": "ack", "id": message_id})
+                        continue
 
-                elif mtype == "load":
-                    if current_room:
-                        current_room.state["path"] = msg.get("path", "")
-                        current_room.state["position"] = 0.0
-                        current_room.state["playing"] = False
-                        # Each client opens their own file -- no broadcast
-
-                elif mtype == "play":
-                    if current_room:
-                        current_room.state["playing"] = True
-                        current_room.state["position"] = msg.get("position", 0.0)
-                        await self.broadcast(current_room, {
-                            "type": "play",
-                            "position": current_room.state["position"],
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                elif mtype == "pause":
-                    if current_room:
-                        current_room.state["playing"] = False
-                        current_room.state["position"] = msg.get("position", 0.0)
-                        current_room.state["paused_at"] = current_room.state["position"]
-                        await self.broadcast(current_room, {
-                            "type": "pause",
-                            "position": current_room.state["position"],
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                elif mtype == "key_press":
-                    if current_room:
-                        await self.broadcast(current_room, {
-                            "type": "key_press",
-                            "key": msg.get("key", ""),
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                elif mtype == "seek_rel":
-                    if current_room:
-                        await self.broadcast(current_room, {
-                            "type": "seek_rel",
-                            "delta": msg.get("delta", 0),
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                elif mtype == "seek":
-                    if current_room:
-                        current_room.state["position"] = msg.get("position", 0.0)
-                        await self.broadcast(current_room, {
-                            "type": "seek",
-                            "position": current_room.state["position"],
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                elif mtype == "chat":
-                    if current_room:
-                        await self.broadcast(current_room, {
-                            "type": "chat",
-                            "from": client_name,
-                            "message": msg.get("message", ""),
-                        }, exclude=client_name)
-
-                elif mtype == "sync_push":
-                    if current_room:
-                        pos = msg.get("position", 0.0)
-                        playing = msg.get("playing", False)
-                        current_room.state["position"] = pos
-                        current_room.state["playing"] = playing
-                        await self.broadcast(current_room, {
-                            "type": "sync_to",
-                            "position": pos,
-                            "playing": playing,
-                            "from": client_name,
-                        }, exclude=client_name)
-
-                else:
-                    await ws.send(json.dumps({"type": "error", "message": f"Unknown type: {mtype}"}))
-
-            except Exception as e:
-                log.error(f"Error handling message: {e}")
-                await ws.send(json.dumps({"type": "error", "message": str(e)}))
-
-        if current_room and client_name in current_room.clients:
-            del current_room.clients[client_name]
-            log.info(f"{client_name} disconnected from room {current_room.code}")
-            if current_room.member_count > 0:
-                await self.broadcast(current_room, {
-                    "type": "member_left",
-                    "name": client_name,
-                    "members": current_room.member_names,
-                })
-            else:
-                del self.rooms[current_room.code]
-                log.info(f"Room {current_room.code} closed (empty)")
+                    if mtype == "sync_request":
+                        peer.send({"type": "sync_state", "room": room.code,
+                                   "request_id": msg.get("request_id"), "state": room.snapshot()})
+                        continue
+                    elif mtype == "chat":
+                        message = str(msg.get("message", ""))[:4000]
+                        room.chat_seq += 1
+                        event = {"type": "chat", "from": member.name,
+                                 "message": message, "id": message_id, "seq": room.chat_seq}
+                        room.history.append((member.token, event))
+                        self.broadcast(room, event, exclude=member)
+                    elif mtype == "load":
+                        # Opening each viewer's own media must not reset the shared clock.
+                        peer.send({"type": "sync_state", "room": room.code, "state": room.snapshot()})
+                    elif mtype in ("play", "pause", "seek", "seek_rel", "sync_push"):
+                        state = room.snapshot()
+                        playing = state["playing"]
+                        position = state["position"]
+                        if mtype == "seek_rel":
+                            delta = float(msg.get("delta", 0))
+                            if not math.isfinite(delta):
+                                raise ValueError("Seek delta must be finite")
+                            position = max(0, position + delta)
+                        else:
+                            position = self._position(msg.get("position", position))
+                        if mtype in ("play", "pause"):
+                            playing = mtype == "play"
+                        elif mtype == "sync_push":
+                            playing = bool(msg.get("playing", False))
+                        room.update(position, playing)
+                        state = room.snapshot()
+                        event = {"type": "sync_state", "room": room.code, "state": state,
+                                 "applied_id": message_id}
+                        legacy_type = "seek" if mtype == "seek_rel" else mtype
+                        legacy = {"type": "sync_state" if mtype == "sync_push" else legacy_type,
+                                  "position": state["position"], "state": state, "from": member.name}
+                        for target in room.members.values():
+                            if target.peer is not None:
+                                if target.peer.protocol >= 2:
+                                    target.peer.send(event)
+                                elif target is not member:
+                                    target.peer.send(legacy)
+                    elif mtype == "key_press":
+                        self.broadcast(room, {"type": "key_press", "key": msg.get("key", ""),
+                                              "from": member.name}, exclude=member)
+                    else:
+                        raise ValueError("Unknown message type")
+                    if message_id:
+                        seen[message_id] = True
+                        while len(seen) > 512:
+                            seen.popitem(last=False)
+                        peer.send({"type": "ack", "id": message_id})
+                except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                    peer.send({"type": "error", "message": str(exc),
+                               "id": msg.get("id") if isinstance(msg, dict) else None})
+        finally:
+            self._detach(room, member, peer)
 
 
 async def main():
-    server = Server()
-    log.info("Server starting on 0.0.0.0:9877")
-    async with serve(server.handle, "0.0.0.0", 9877) as s:
-        await s.serve_forever()
+    async with Server() as server:
+        log.info("Server starting on 0.0.0.0:9877")
+        async with serve(server.handle, "0.0.0.0", 9877, ping_interval=10,
+                         ping_timeout=30, close_timeout=2, max_size=65536) as listener:
+            await listener.serve_forever()
 
 
 if __name__ == "__main__":

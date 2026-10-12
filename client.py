@@ -1,24 +1,11 @@
 ﻿"""XiangJian GuanYing - Client entry point."""
 import sys
-import os, os
+import os
+from app.runtime import configure_runtime
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Add libmpv DLL to PATH so mpv library can find it
-_libmpv_dir = os.path.join(_script_dir, "libmpv")
-os.environ["PATH"] = _libmpv_dir + os.pathsep + os.environ.get("PATH", "")
-
-if getattr(sys, 'frozen', False):
-    _ext_platforms = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "platforms")
-    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.abspath(_ext_platforms)
-else:
-    import importlib.util
-    _spec = importlib.util.find_spec("PySide6")
-    if _spec and _spec.origin:
-        _pyside6_dir = os.path.dirname(os.path.abspath(_spec.origin))
-        os.environ["PATH"] = _pyside6_dir + os.pathsep + os.environ.get("PATH", "")
-        _plugins_dir = os.path.join(_pyside6_dir, "plugins", "platforms")
-        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.abspath(_plugins_dir)
+configure_runtime()
 
 os.environ['QT_LOGGING_RULES'] = 'qt.qpa.mousegrab.warning=false'
 
@@ -31,9 +18,11 @@ def _setup_crash_log():
     log_path = os.path.join(log_dir, "crash.log")
     fh = logging.FileHandler(log_path, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("[%%(asctime)s] %(levelname)s: %(message)s"))
+    fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s"))
     logging.getLogger().addHandler(fh)
     logging.getLogger().setLevel(logging.DEBUG)
+    # WebSocket DEBUG frames include private session tokens and chat text.
+    logging.getLogger("websockets").setLevel(logging.WARNING)
     logging.info("Client starting (frozen=%s)", getattr(sys, "frozen", False))
     # Global exception hook
     def _excepthook(exc_type, exc_val, tb):

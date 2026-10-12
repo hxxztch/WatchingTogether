@@ -100,11 +100,11 @@ class MpvWidget(QWidget):
 
     @property
     def position(self) -> float:
-        return self._player.time_pos if self._player else 0.0
+        return (self._player.time_pos or 0.0) if self._player else 0.0
 
     @property
     def duration(self) -> float:
-        return self._player.duration if self._player else 0.0
+        return (self._player.duration or 0.0) if self._player else 0.0
 
     @property
     def is_playing(self) -> bool:
@@ -196,6 +196,10 @@ class MpvWidget(QWidget):
     def seek_relative(self, seconds: float):
         if self._player:
             self._player.seek(seconds, "relative+exact")
+
+    def set_speed(self, speed: float):
+        if self._player:
+            self._player.speed = speed
 
     def set_volume(self, vol: int):
         if self._player:

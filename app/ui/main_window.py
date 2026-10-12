@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon, QPixmap
 
 from app.player import MpvWidget
 from app.network import NetworkClient
+from app.sync import PlaybackSynchronizer
 from app.ui.room_panel import RoomPanel
 from app.ui.controls import ControlsBar
 from app.ui.danmaku import DanmakuOverlay
@@ -86,6 +87,8 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(_pix))
 
         self._room_code = ""
+        self._room_ready = False
+        self._playback_sync = PlaybackSynchronizer()
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
         self._my_name = ""
         self._syncing = False
@@ -117,6 +120,7 @@ class MainWindow(QMainWindow):
         self._network.signals.disconnected.connect(self._on_disconnected)
         self._network.signals.message_received.connect(self._on_message)
         self._network.signals.error_occurred.connect(self._on_net_error)
+        self._network.signals.latency_updated.connect(self._on_latency)
         self._network.start()
 
         self._player = MpvWidget()
@@ -162,6 +166,9 @@ class MainWindow(QMainWindow):
         self._left_panel = left
 
         from PySide6.QtCore import QTimer as _QTimer
+        self._vid_info_timer = _QTimer(self)
+        self._vid_info_timer.timeout.connect(self._poll_video_info)
+        self._vid_info_timer.start(2000)
         self._fs_timer = _QTimer()
         self._fs_timer.setSingleShot(True)
         self._fs_timer.timeout.connect(self._hide_fs_controls)
@@ -177,17 +184,21 @@ class MainWindow(QMainWindow):
         """Stop current connection and reconnect to a new server URL."""
         self._room_panel.set_status("正在连接...", "#FFD54F")
         if hasattr(self, '_network') and self._network:
-            self._network.stop()
-            self._network.wait(3000)
+            if not self._network.stop():
+                self._room_panel.set_status("连接仍在关闭，请稍后重试", "#f44336")
+                return
             self._network.deleteLater()
+        self._room_code = ""
+        self._room_ready = False
+        self._playback_sync = PlaybackSynchronizer()
+        self._room_panel.set_in_room(False)
+        self._player.set_speed(1.0)
         self._network = NetworkClient(url)
-        self._vid_info_timer = QTimer()
-        self._vid_info_timer.timeout.connect(self._poll_video_info)
-        self._vid_info_timer.start(2000)  # check every 2s
         self._network.signals.connected.connect(self._on_connected)
         self._network.signals.disconnected.connect(self._on_disconnected)
         self._network.signals.message_received.connect(self._on_message)
         self._network.signals.error_occurred.connect(self._on_net_error)
+        self._network.signals.latency_updated.connect(self._on_latency)
         self._network.start()
 
     def _player_volume(self, vol):
@@ -213,39 +224,80 @@ class MainWindow(QMainWindow):
             self._controls.set_audio_tracks(tracks)
 
     def _on_connected(self):
-        self._room_panel.set_status("已连接", "#4CAF50")
+        if not self._current_network_event():
+            return
+        self._room_panel.set_status("正在恢复房间..." if self._room_code else "已连接", "#4CAF50")
         self._room_panel.update_server_label(self._room_panel.get_server_url())
     def _on_disconnected(self):
-        self._room_panel.set_status("未连接", "#f44336")
-        self._room_panel.set_in_room(False)
-        self._room_code = ""
-        self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
+        if not self._current_network_event():
+            return
+        self._room_ready = False
+        self._player.set_speed(1.0)
+        self._room_panel.set_status("连接中断，正在自动重连...", "#FFD54F")
 
-    def _on_net_error(self, err): self._room_panel.set_status(err, "#f44336")
+    def _on_latency(self, milliseconds):
+        if not self._current_network_event():
+            return
+        if self._room_ready:
+            self._room_panel.set_status(
+                f"房间 {self._room_code} · 延迟 {milliseconds:.0f} ms", "#4CAF50")
+
+    def _apply_room_state(self, state, force=False):
+        if not self._room_ready:
+            return
+        try:
+            plan = self._playback_sync.plan(
+                state, self._player.position, self._player.duration, force=force)
+            if plan is None:
+                return
+            self._player.set_speed(plan["speed"])
+            if plan["seek"] is not None:
+                self._player.seek(plan["seek"])
+            if plan["playing"]:
+                self._player.play()
+            else:
+                self._player.pause()
+        except (TypeError, ValueError, RuntimeError):
+            logging.exception("Could not apply room playback state")
+
+    def _current_network_event(self):
+        source = self.sender()
+        return source is None or source is self._network.signals
+
+    def _on_net_error(self, err):
+        if self._current_network_event():
+            self._room_panel.set_status(err, "#f44336")
 
     def _on_message(self, msg):
+        if not self._current_network_event():
+            return
         mtype = msg.get("type", "")
         self._syncing = True
         try:
-            if mtype == "room_created":
+            if mtype in ("room_created", "room_joined"):
                 self._room_code = msg["room"]
-                self._room_panel.set_in_room(True, self._room_code, msg.get("members", [self._my_name]))
-                self._room_panel.set_status("Room " + self._room_code, "#FFD54F")
-            elif mtype == "room_joined":
-                self._room_code = msg["room"]
-                self._my_name = msg.get("name", "")
+                self._room_ready = True
+                self._playback_sync = PlaybackSynchronizer()
+                self._my_name = msg.get("name", self._my_name)
                 self._room_panel.set_in_room(True, self._room_code, msg.get("members", []))
-                self._room_panel.set_status("已加入房间 " + self._room_code, "#4CAF50")
-                st = msg.get("state", {})
-                pos = st.get("position", 0)
-                if pos > 0:
-                    self._player.seek(pos)
-                if st.get("playing"):
-                    self._player.play()
+                self._room_panel.set_status(
+                    ("已恢复房间 " if msg.get("resumed") else "已加入房间 ") + self._room_code,
+                    "#4CAF50")
+                self._apply_room_state(msg.get("state", {}), force=True)
             elif mtype == "left_room":
                 self._room_code = ""
+                self._room_ready = False
+                self._player.set_speed(1.0)
                 self._room_panel.set_in_room(False)
                 self._room_panel.set_status("已离开房间", "#999")
+            elif mtype == "session_expired":
+                self._room_code = ""
+                self._room_ready = False
+                self._player.set_speed(1.0)
+                self._room_panel.set_in_room(False)
+                self._room_panel.set_status("房间已过期或服务端已重启，请重新创建或加入", "#FFD54F")
+            elif mtype == "delivery_failed":
+                self._room_panel.add_chat("系统", msg["message"])
             elif mtype == "member_joined":
                 self._room_panel.add_chat("系统", msg["name"] + " 加入了")
                 self._room_panel.update_members(msg.get("members", []))
@@ -261,6 +313,9 @@ class MainWindow(QMainWindow):
                 self._player.play()
             elif mtype == "pause":
                 self._player.pause()
+                self._player.set_speed(1.0)
+                if "position" in msg:
+                    self._player.seek(msg["position"])
             elif mtype == "seek_rel":
                 self._player.seek_relative(msg.get("delta", 0))
             elif mtype == "seek":
@@ -269,12 +324,8 @@ class MainWindow(QMainWindow):
             elif mtype == "chat":
                 self._room_panel.add_chat(msg.get("from", ""), msg.get("message", "")); self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""))
             elif mtype == "sync_state":
-                st = msg.get("state", {})
-                pos = st.get("position", 0)
-                if pos > 0:
-                    self._player.seek(pos)
-                if st.get("playing"):
-                    self._player.play()
+                if msg.get("room", self._room_code) == self._room_code:
+                    self._apply_room_state(msg.get("state", {}))
             elif mtype == "error":
                 QMessageBox.warning(self, "错误", msg.get("message", ""))
         finally:
@@ -449,7 +500,8 @@ class MainWindow(QMainWindow):
     def _on_leave_room(self):
         self._network.send({"type": "leave_room"})
         self._room_code = ""
-        self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
+        self._room_ready = False
+        self._player.set_speed(1.0)
 
     def _on_bili_login(self):
         """Bilibili QR login via API: generate QR, poll scan, exchange for SESSDATA."""
