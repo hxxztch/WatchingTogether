@@ -275,6 +275,10 @@ class Server:
                             if not math.isfinite(delta):
                                 raise ValueError("Seek delta must be finite")
                             position = max(0, position + delta)
+                            if "duration" in msg:
+                                duration = self._position(msg["duration"])
+                                if duration > 0:
+                                    position = min(position, duration)
                         else:
                             position = self._position(msg.get("position", position))
                         if mtype in ("play", "pause"):

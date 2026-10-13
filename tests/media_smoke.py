@@ -58,12 +58,16 @@ def main():
             window = MainWindow()
             window._network.stop()
             try:
-                media = Path(temporary) / 'sample.y4m'
+                window._controls._vol_slider_v.setValue(64)
+                assert window._player.volume == 64
+                media = Path(temporary) / '本地 视频.y4m'
                 media.write_bytes(b'YUV4MPEG2 W16 H16 F25:1 Ip A1:1 C420jpeg\n' +
                                   (b'FRAME\n' + bytes([128]) * 384) * 500)
-                window._on_load_file(str(media))
+                # QFileDialog returns forward slashes; mpv normalizes to '\\'.
+                window._on_load_file(media.as_posix())
                 wait_for(lambda: not window._player.is_loading and window._player.duration > 0)
                 assert window._player.is_playing, 'Local media did not auto-play'
+                assert window._player.volume == 64, 'Volume selected before media load was lost'
                 window._player.pause()
                 controls = window._controls
                 controls.show()
@@ -84,6 +88,28 @@ def main():
                 QTest.keyClick(controls._time_editor, Qt.Key_Return)
                 wait_for(lambda: abs(window._player.position - 4) < .3)
                 assert seeks == [4] and not window._player.is_playing
+                QTest.keyClick(window._player, Qt.Key_Right)
+                wait_for(lambda: abs(window._player.position - 9) < .3)
+                QTest.keyClick(window._player, Qt.Key_Left)
+                wait_for(lambda: abs(window._player.position - 4) < .3)
+                from PySide6.QtCore import QEvent
+                from PySide6.QtGui import QKeyEvent
+                app.sendEvent(window._player, QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.NoModifier, '', True))
+                app.processEvents()
+                assert abs(window._player.position - 4) < .3
+                levels = []
+                controls.volume_changed.connect(levels.append)
+                controls._vol_slider_v.setValue(37)
+                controls._show_vol_popup()
+                QTest.mouseClick(controls._vol_btn, Qt.LeftButton)
+                assert window._player.volume == 0 and levels == [37, 0]
+                QTest.mouseClick(controls._vol_btn, Qt.LeftButton)
+                assert window._player.volume == 37 and levels == [37, 0, 37]
+                controls._vol_slider_v.setValue(0)
+                QTest.mouseClick(controls._vol_btn, Qt.LeftButton)
+                assert window._player.volume == 37
+                controls._vol_popup.hide()
+                print('PASS: QFileDialog path normalization, local +/-5s, key-repeat suppression, mute restores 37%', flush=True)
                 for value in ['00:60', '99', 'bad']:
                     edit(value)
                     QTest.keyClick(controls._time_editor, Qt.Key_Return)

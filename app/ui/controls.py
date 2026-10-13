@@ -174,7 +174,8 @@ class ControlsBar(QWidget):
 
         # Volume popup
         self._vol_popup = QFrame(self.window())
-        self._vol_popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self._vol_popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
+        self._vol_popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self._vol_popup.setStyleSheet(
             "QFrame { background-color: #2a2a2a; border: 1px solid #555; border-radius: 3px; }"
         )
@@ -386,21 +387,12 @@ class ControlsBar(QWidget):
         self._update_vol_icon(value)
 
     def _on_vol_toggle(self):
-        if self._muted:
-            self._muted = False
-            vol = self._vol_before_mute if self._vol_before_mute > 0 else 80
-            self._vol_slider_v.setValue(vol)
-            self.volume_changed.emit(vol)
-            self._update_vol_icon(vol)
-        else:
-            cur = self._vol_slider_v.value()
-            self._vol_before_mute = cur if cur > 0 else 80
-            self._muted = True
-            self._vol_slider_v.setValue(0)
-            self.volume_changed.emit(0)
-            self._update_vol_icon(0)
+        # valueChanged emits once and records the last nonzero volume.
+        self._vol_slider_v.setValue(self._vol_before_mute if self._muted else 0)
 
     def _update_vol_icon(self, vol):
+        if vol > 0:
+            self._vol_before_mute = vol
         if vol == 0:
             self._vol_btn.setText("\U0001F507")
             self._muted = True
@@ -410,7 +402,8 @@ class ControlsBar(QWidget):
         else:
             self._vol_btn.setText("\U0001F50A")
             self._muted = False
-        self._vol_btn.setToolTip("\u97F3\u91CF: {}".format(vol))
+        self._vol_btn.setToolTip("点击恢复音量: {}".format(self._vol_before_mute) if vol == 0
+                                else "音量: {}，点击静音".format(vol))
 
     # ================================================================
     #  more menu rebuild

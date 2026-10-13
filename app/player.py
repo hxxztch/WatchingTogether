@@ -30,6 +30,7 @@ class MpvWidget(QWidget):
         self._setup_done = False
         self._loading = False
         self._loading_path = None
+        self._volume = 80
 
     def _ensure_player(self):
         if self._setup_done:
@@ -45,7 +46,7 @@ class MpvWidget(QWidget):
             cache="yes",
             demuxer_max_bytes="100M",
             demuxer_readahead_secs="30",
-            volume=80,
+            volume=self._volume,
             volume_max=130,
         )
         self._setup_done = True
@@ -69,7 +70,7 @@ class MpvWidget(QWidget):
 
         @self._player.event_callback("file-loaded")
         def _on_file_loaded(event):
-            if self._player.path == self._loading_path:
+            if self._same_path(self._player.path, self._loading_path):
                 self._loading = False
 
         @self._player.event_callback("end-file")
@@ -104,6 +105,15 @@ class MpvWidget(QWidget):
     @property
     def is_loading(self) -> bool:
         return self._loading
+
+    @staticmethod
+    def _same_path(actual, requested):
+        if not actual or not requested:
+            return False
+        if "://" in actual or "://" in requested:
+            return actual == requested
+        # QFileDialog uses '/', while Windows mpv returns '\\'.
+        return os.path.normcase(os.path.abspath(actual)) == os.path.normcase(os.path.abspath(requested))
 
     def load(self, path: str, start_pos: float = 0.0, resume_play=False):
         self._replace_stream(path, "", start_pos, resume_play)
@@ -161,23 +171,24 @@ class MpvWidget(QWidget):
 
     def seek(self, position: float):
         if self._player and not self.is_loading and self.duration > 0:
-            self._player.seek(position, "absolute+exact")
+            self._player.seek(position, "absolute", "exact")
 
     def seek_relative(self, seconds: float):
         if self._player and not self.is_loading and self.duration > 0:
-            self._player.seek(seconds, "relative+exact")
+            self._player.seek(seconds, "relative", "exact")
 
     def set_speed(self, speed: float):
         if self._player:
             self._player.speed = speed
 
     def set_volume(self, vol: int):
+        self._volume = max(0, min(130, vol))
         if self._player:
-            self._player.volume = max(0, min(130, vol))
+            self._player.volume = self._volume
 
     @property
     def volume(self) -> int:
-        return int(self._player.volume) if self._player else 80
+        return int(self._player.volume) if self._player else self._volume
 
     def load_subtitle(self, path: str):
         """Load an external subtitle file."""
