@@ -41,13 +41,16 @@ class DanmakuOverlay(QWidget):
                              self._target.width(), self._target.height())
             self.show()
             self.raise_()
+        else:
+            self.hide()
 
     def show_danmaku(self, sender: str, text: str):
-        if not self._target:
+        if not self._target or len(self._labels) >= 40:
             return
         self._sync_position()
 
         label = QLabel(f"{sender}: {text}", self)
+        label.setTextFormat(Qt.PlainText)
         color = random.choice(self._colors)
         label.setStyleSheet(
             f"color: {color}; font-size: 16px; font-weight: bold; "

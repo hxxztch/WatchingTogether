@@ -129,6 +129,7 @@ class RoomPanel(QWidget):
         ir_layout.addWidget(self._chat_list)
         chat_row = QHBoxLayout()
         self._chat_input = QLineEdit()
+        self._chat_input.setMaxLength(4000)
         self._chat_input.setPlaceholderText("输入消息...")
         self._chat_input.returnPressed.connect(self._on_send_chat)
         chat_row.addWidget(self._chat_input)
@@ -141,6 +142,8 @@ class RoomPanel(QWidget):
         layout.addWidget(self._stack)
 
         self._status = QLabel("未连接")
+        self._status.setTextFormat(Qt.PlainText)
+        self._status.setWordWrap(True)
         self._status.setAlignment(Qt.AlignCenter)
         self._status.setObjectName("status_label")
         layout.addWidget(self._status)
@@ -179,12 +182,16 @@ class RoomPanel(QWidget):
 
     def _load_config(self):
         cfg = _cfg_load()
+        self._server_input.blockSignals(True)
+        self._name_input.blockSignals(True)
         self._server_input.setText(cfg.get("server", "ws://localhost:9877"))
         self._name_input.setText(cfg.get("nickname", ""))
-        self._on_name_changed()
+        self._server_input.blockSignals(False)
+        self._name_input.blockSignals(False)
 
     def _save_config(self):
-        _cfg_save(server=self._server_input.text().strip(), nickname=self._name_input.text().strip())
+        if not _cfg_save(server=self._server_input.text().strip(), nickname=self._name_input.text().strip()):
+            self.set_status("配置保存失败，请检查目录写入权限", "#f44336")
 
     def get_server_url(self) -> str:
         return self._server_input.text().strip() or "ws://localhost:9877"
@@ -246,6 +253,8 @@ class RoomPanel(QWidget):
 
     def add_chat(self, sender: str, msg: str):
         self._chat_list.addItem(f"[{sender}] {msg}")
+        while self._chat_list.count() > 1000:
+            self._chat_list.takeItem(0)
         self._chat_list.scrollToBottom()
 
     def set_status(self, text: str, color: str = "#999"):

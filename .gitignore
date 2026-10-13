@@ -12,3 +12,4 @@ _patch*.py
 crash.log
 vc_redist.x64.exe
 config.json
+.film-config-*.tmp

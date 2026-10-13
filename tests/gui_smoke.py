@@ -17,6 +17,8 @@ from app.runtime import configure_runtime
 configure_runtime()
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
+from PySide6.QtCore import Qt
 from websockets.asyncio.server import serve
 import app.config as config
 from app.ui.main_window import MainWindow
@@ -82,7 +84,10 @@ def main():
             wait_for(lambda: host._room_ready)
             guest._on_join_room(host._room_code, "guest")
             wait_for(lambda: guest._room_ready)
-            host._on_seek(4)
+            host._controls.set_position(0, 20)
+            QTest.mouseClick(host._controls._time_label, Qt.LeftButton)
+            host._controls._time_editor.setText("00:04")
+            QTest.keyClick(host._controls._time_editor, Qt.Key_Return)
             wait_for(lambda: abs(guest._player.position - 4) < 0.3)
             host._on_toggle_play()
             wait_for(lambda: guest._player.is_playing)
@@ -97,7 +102,7 @@ def main():
             guest._on_leave_room()
             wait_for(lambda: not guest._room_ready and guest._network._session is None)
             assert not exceptions, "Unexpected Qt callback exception"
-            print("GUI smoke passed: create/join, seek/play, disconnect/resume at paused zero, leave")
+            print("GUI smoke passed: create/join, typed-time room seek/play, disconnect/resume at paused zero, leave")
         finally:
             for window in windows:
                 window.close()

@@ -1,4 +1,4 @@
-﻿"""Main application window."""
+"""Main application window."""
 import os as _os, sys, logging, subprocess, shutil, re, json, urllib.request
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer
 import base64
-import hashlib
+import threading
 from PySide6.QtGui import QIcon, QPixmap
 
 from app.player import MpvWidget
 from app.network import NetworkClient
 from app.sync import PlaybackSynchronizer
+from app.bilibili import BilibiliClient, BilibiliError, QualityUnavailable
 from app.ui.room_panel import RoomPanel
 from app.ui.controls import ControlsBar
 from app.ui.danmaku import DanmakuOverlay
@@ -74,6 +75,7 @@ QMessageBox QPushButton {
 
 class MainWindow(QMainWindow):
     _hotkey = Signal(str)
+    _quality_result = Signal(int, object)
 
     def __init__(self):
         super().__init__()
@@ -90,6 +92,10 @@ class MainWindow(QMainWindow):
         self._room_ready = False
         self._playback_sync = PlaybackSynchronizer()
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
+        self._bili_api = BilibiliClient()
+        self._quality_generation = 0
+        self._quality_busy = False
+        self._quality_result.connect(self._finish_quality_change)
         self._my_name = ""
         self._syncing = False
 
@@ -127,6 +133,8 @@ class MainWindow(QMainWindow):
         self._player.position_changed.connect(self._on_position)
         self._player.playback_started.connect(lambda: self._controls.set_playing(True))
         self._player.playback_paused.connect(lambda: self._controls.set_playing(False))
+        self._player.media_load_failed.connect(
+            lambda: self._room_panel.set_status("视频流加载失败，请重试或重新解析视频链接", "#f44336"))
 
         self._danmaku = DanmakuOverlay(self)
         self._danmaku.track(self._player)
@@ -206,8 +214,13 @@ class MainWindow(QMainWindow):
             self._player.set_volume(vol)
 
     def _on_stop(self):
+        self._invalidate_quality_request()
         self._bili_info = None
         self._controls.set_video_quality("", None)
+        self._controls.set_pages([], 0)
+        self._controls.set_audio_tracks([], -1)
+        self._controls.set_position(0, 0)
+        self._controls.set_playing(False)
         self._player.stop()
 
     def _on_audio_select(self, track_id):
@@ -243,7 +256,7 @@ class MainWindow(QMainWindow):
                 f"房间 {self._room_code} · 延迟 {milliseconds:.0f} ms", "#4CAF50")
 
     def _apply_room_state(self, state, force=False):
-        if not self._room_ready:
+        if not self._room_ready or self._player.is_loading:
             return
         try:
             plan = self._playback_sync.plan(
@@ -332,162 +345,10 @@ class MainWindow(QMainWindow):
             self._syncing = False
 
     
-    _wbi_mix_key = None
-    _wbi_expires = 0
-
-    def _get_wbi_mix_key(self):
-        """Fetch and cache WBI mixin key for API signing."""
-        import time
-        now = int(time.time())
-        if self._wbi_mix_key and now < self._wbi_expires:
-            return self._wbi_mix_key
-        try:
-            req = urllib.request.Request(
-                "https://api.bilibili.com/x/web-interface/nav",
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                         "Referer": "https://www.bilibili.com/"})
-            resp = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
-            wi = resp["data"]["wbi_img"]
-            ik = wi["img_url"].split("/")[-1].split(".")[0]
-            sk = wi["sub_url"].split("/")[-1].split(".")[0]
-            self._wbi_mix_key = (ik + sk)[:32]
-            self._wbi_expires = now + 3600  # cache 1 hour
-            return self._wbi_mix_key
-        except Exception:
-            return None
-
-    def _wbi_sign_url(self, base_url, params):
-        """Sign URL params with WBI and return full URL string."""
-        import time
-        mix_key = self._get_wbi_mix_key()
-        if not mix_key:
-            return None
-        params["wts"] = str(int(time.time()))
-        sorted_keys = sorted(params.keys())
-        qs = "&".join(f"{k}={params[k]}" for k in sorted_keys)
-        w_rid = hashlib.md5((qs + mix_key).encode()).hexdigest()
-        params["w_rid"] = w_rid
-        return base_url + "?" + "&".join(f"{k}={params[k]}" for k in params)
-
-    def _fetch_bilibili_streams(self, avid, cid, qn, headers):
-        """Unified quality-switch fetcher. Tries WBI-DASH -> old-DASH -> FLV.
-
-        Always forwards the saved bilibili login cookie so that login-required
-        qualities (1080P+) are accessible.
-
-        Returns (video_url, audio_url, actual_qn, quality_map).
-        audio_url is "" for FLV (embedded audio).  All elements are None on total failure.
-        """
-        import traceback as _tb
-
-        # ---- attach login cookie ----
-        req_headers = dict(headers)
-        try:
-            from app.config import load as _cfg_load
-            c = _cfg_load().get("bili_cookie", "")
-            if c:
-                req_headers["Cookie"] = c
-        except Exception:
-            pass
-
-        pd = None
-        actual_qn = qn
-
-        # --- Try 1: WBI-signed DASH (fnval=4048) ---
-        try:
-            params = {
-                "avid": str(avid), "cid": str(cid), "qn": str(qn),
-                "platform": "web", "otype": "json", "fourk": "1", "fnval": "4048",
-            }
-            signed = self._wbi_sign_url("https://api.bilibili.com/x/player/wbi/playurl", params)
-            if signed:
-                r = urllib.request.Request(signed, headers=req_headers)
-                j = json.loads(urllib.request.urlopen(r, timeout=15).read().decode("utf-8"))
-                if j.get("code") == 0:
-                    pd = j["data"]
-        except Exception:
-            logging.warning("WBI DASH fetch failed:\n%s", _tb.format_exc())
-
-        # --- Try 2: old-API DASH (fnval=16) ---
-        if pd is None:
-            try:
-                u = (f"https://api.bilibili.com/x/player/playurl"
-                     f"?avid={avid}&cid={cid}&qn={qn}"
-                     f"&platform=html5&otype=json&fnval=16")
-                r = urllib.request.Request(u, headers=req_headers)
-                j = json.loads(urllib.request.urlopen(r, timeout=15).read().decode("utf-8"))
-                if j.get("code") == 0:
-                    pd = j["data"]
-            except Exception:
-                pass
-
-        # --- Try 3: old-API FLV (fnval=1) ---
-        if pd is None:
-            try:
-                u = (f"https://api.bilibili.com/x/player/playurl"
-                     f"?avid={avid}&cid={cid}&qn={qn}"
-                     f"&platform=html5&otype=json&fnval=1")
-                r = urllib.request.Request(u, headers=req_headers)
-                j = json.loads(urllib.request.urlopen(r, timeout=15).read().decode("utf-8"))
-                if j.get("code") == 0:
-                    pd = j["data"]
-            except Exception:
-                pass
-
-        if pd is None:
-            return None, None, qn, {}
-
-        # ---- quality_map (robust: merge accept_quality + support_formats) ----
-        actual_qn = pd.get("quality", qn)
-        quality_map = {}
-
-        # Primary source: accept_quality / accept_description
-        aq_list = pd.get("accept_quality", [])
-        ad_list = pd.get("accept_description", [])
-        for i, q in enumerate(aq_list):
-            d = ad_list[i] if i < len(ad_list) else (str(q) + "P")
-            quality_map[str(q)] = d
-
-        # Secondary: support_formats (often richer descriptions)
-        if "support_formats" in pd:
-            for fmt in pd["support_formats"]:
-                q = fmt.get("quality")
-                if q is None:
-                    continue
-                d = (fmt.get("new_description", "")
-                     or fmt.get("display_desc", "")
-                     or quality_map.get(str(q), "")
-                     or (str(q) + "P"))
-                quality_map[str(q)] = d
-
-        # If still empty, at least put the actual qn in
-        if not quality_map:
-            quality_map[str(actual_qn)] = str(actual_qn) + "P"
-
-        logging.info(
-            "B? stream fetch: requested qn=%s  actual_qn=%s  quality_map=%s",
-            qn, actual_qn, list(quality_map.values()),
-        )
-
-
-        # ---- extract URLs ----
-        video_url = None
-        audio_url = ""
-        if "dash" in pd:
-            dv = pd["dash"].get("video", [])
-            da = pd["dash"].get("audio", [])
-            if dv:
-                video_url = dv[0].get("base_url", "") or dv[0].get("url", "")
-            if da:
-                audio_url = da[0].get("base_url", "") or da[0].get("url", "")
-        if not video_url and "durl" in pd and pd["durl"]:
-            video_url = pd["durl"][0].get("url", "")
-
-        if not video_url:
-            return None, None, actual_qn, quality_map
-
-        return video_url, audio_url, actual_qn, quality_map
-
+    def _fetch_bilibili_streams(self, avid, cid, qn, headers, strict=False):
+        from app.config import load as load_config
+        return self._bili_api.fetch_streams(
+            avid, cid, qn, headers, cookie=load_config().get("bili_cookie", ""), strict=strict)
 
     def _on_create_room(self, name):
         self._my_name = name
@@ -729,6 +590,7 @@ class MainWindow(QMainWindow):
         dlg.finished.connect(_on_finished)
         dlg.exec()
     def _on_bili_logout(self):
+        self._invalidate_quality_request()
         from app.config import save as _cfg_save
         _cfg_save(bili_cookie="", bili_uid="", bili_uname="")
         self._controls.set_bili_status(False)
@@ -767,17 +629,20 @@ class MainWindow(QMainWindow):
                 self._network.send({"type": "play", "position": pos})
 
     def _on_seek(self, pos):
+        if self._player.is_loading or self._player.duration <= 0:
+            self._room_panel.set_status("请等待视频加载完成后再跳转", "#FFD54F")
+            return
         self._player.seek(pos)
         if self._room_code:
             self._network.send({"type": "seek", "position": pos})
 
     def _on_load_file(self, path):
+        self._invalidate_quality_request()
         self._bili_info = None
         self._controls.set_video_quality("", None)
         self._controls.set_pages([], 0)
         self._controls.set_audio_tracks([], -1)
-        self._player.load(path)
-        self._player.play()
+        self._player.load(path, resume_play=True)
         self._refresh_audio_tracks()
         if self._room_code:
             self._network.send({"type": "load", "path": path})
@@ -878,6 +743,8 @@ class MainWindow(QMainWindow):
 
     def _on_load_url(self, url):
         """Load from URL.  B站 videos use unified DASH-first path."""
+        self._invalidate_quality_request()
+        self._bili_info = None
         self._controls.set_audio_tracks([], -1)
         bili = self._resolve_bilibili(url)
         if bili:
@@ -886,12 +753,12 @@ class MainWindow(QMainWindow):
             self._room_panel.set_status("B站解析成功: " + current_desc, "#4CAF50")
 
             if audio_url:
-                self._player.load_dash(bili["video_url"], audio_url, resume_play=False)
+                self._player.load_dash(bili["video_url"], audio_url, resume_play=True, seek_pos=0)
             else:
-                self._player.load(bili["video_url"])
+                self._player.replace_flv(bili["video_url"], 0, True)
 
             qmap = bili.get("quality_map", {})
-            self._controls.set_video_quality(current_desc, list(qmap.values()))
+            self._controls.set_video_quality(current_desc, qmap)
             pages = bili.get("pages", [])
             if pages and len(pages) > 1:
                 self._controls.set_pages(pages, 0)
@@ -902,7 +769,7 @@ class MainWindow(QMainWindow):
             if resolved:
                 self._room_panel.set_status("解析成功", "#4CAF50")
                 url = resolved
-            self._player.load(url)
+            self._player.load(url, resume_play=True)
             self._bili_info = None
             self._controls.set_video_quality("", None)
             self._controls.set_pages([], 0)
@@ -914,6 +781,8 @@ class MainWindow(QMainWindow):
 
     def _poll_video_info(self):
         """Show actual mpv resolution in the quality label."""
+        if self._player.is_loading:
+            return
         label = self._player.get_quality_label()
         if not label:
             # Still show prefix even when mpv hasnt reported resolution yet
@@ -925,68 +794,91 @@ class MainWindow(QMainWindow):
         else:
             self._controls.set_video_quality(label, None)
 
-    def _on_quality_change(self, quality_text):
-        """Switch B站 video quality -- single unified code path."""
+    def _invalidate_quality_request(self):
+        self._quality_generation += 1
+        self._quality_busy = False
+        self._controls.set_quality_busy(False)
+
+    def _restore_quality_controls(self, bi):
+        current = bi["quality_map"].get(str(bi["current_qn"]), "")
+        self._controls.set_video_quality(current, bi["quality_map"])
+        self._poll_video_info()
+
+    def _on_quality_change(self, selection):
+        """Resolve a specific representation without blocking Qt or room synchronization."""
         bi = self._bili_info
-        if not bi or not quality_text:
-            self._room_panel.set_status("画质切换: 无B站信息或空文本", "#f44336")
+        if not bi or not selection:
             return
-
-        qn = None
-        for q, desc in bi["quality_map"].items():
-            if desc == quality_text:
-                qn = int(q)
-                break
+        if self._quality_busy or self._player.is_loading:
+            self._restore_quality_controls(bi)
+            self._room_panel.set_status("视频正在加载，请稍后切换", "#FFD54F")
+            return
+        qn = int(selection) if selection in bi["quality_map"] else next(
+            (int(q) for q, desc in bi["quality_map"].items() if desc == selection), None)
         if qn is None:
-            self._room_panel.set_status("画质切换: 未找到qn", "#f44336")
             return
-        if qn == bi["current_qn"]:
-            self._room_panel.set_status("已是最佳画质", "#FFD54F")
+        if qn == bi["current_qn"] and self._player.duration > 0:
+            self._room_panel.set_status("当前已是所选清晰度", "#FFD54F")
             return
 
+        self._quality_generation += 1
+        generation = self._quality_generation
+        self._quality_busy = True
+        self._controls.set_quality_busy(True)
+        self._room_panel.set_status("正在获取清晰度: " + bi["quality_map"][str(qn)], "#FFD54F")
+
+        def fetch():
+            try:
+                result = self._fetch_bilibili_streams(
+                    bi["avid"], bi["cid"], qn, bi["headers"], strict=True)
+            except Exception as exc:
+                result = exc
+            try:
+                self._quality_result.emit(generation, (bi, result))
+            except RuntimeError:
+                pass  # Window was closed while the HTTP request completed.
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _finish_quality_change(self, generation, payload):
+        if generation != self._quality_generation:
+            return
+        bi, result = payload
+        if bi is not self._bili_info:
+            return
+        self._quality_busy = False
+        self._controls.set_quality_busy(False)
+        if isinstance(result, Exception):
+            if isinstance(result, QualityUnavailable):
+                bi["quality_map"] = result.available
+            self._restore_quality_controls(bi)
+            detail = str(result) if isinstance(result, BilibiliError) else type(result).__name__
+            self._room_panel.set_status("画质切换失败: " + detail, "#f44336")
+            return
+
+        video_url, audio_url, new_qn, quality_map = result
         try:
-            was_playing = self._player.is_playing
-            pos = max(0, self._player.position or 0)
-
-            logging.info(
-                "Quality switch requested: qn=%s  current_qn=%s",
-                qn, bi["current_qn"],
-            )
-
-            video_url, audio_url, new_qn, quality_map = self._fetch_bilibili_streams(
-                bi["avid"], bi["cid"], qn, bi["headers"]
-            )
-
-            if not video_url:
-                self._room_panel.set_status("画质切换失败: 无视频URL", "#f44336")
-                return
-
-            if quality_map:
-                bi["quality_map"].update(quality_map)
-
+            # Capture the position now, not before the potentially slow API request.
+            pos, was_playing = self._player.position, self._player.is_playing
             if audio_url:
                 self._player.load_dash(video_url, audio_url, was_playing, pos)
             else:
-                self._player.load(video_url, start_pos=pos)
-                if was_playing:
-                    self._player.play()
-
+                self._player.replace_flv(video_url, pos, was_playing)
             bi["current_qn"] = new_qn
-            actual_desc = bi["quality_map"].get(str(new_qn), quality_text + "P")
-            self._controls.set_video_quality(actual_desc, list(bi["quality_map"].values()))
-            self._poll_video_info()
-            self._room_panel.set_status("画质切换到: " + actual_desc, "#4CAF50")
-            logging.info(
-                "Quality switch OK: requested qn=%s  actual_qn=%s  %s",
-                qn, new_qn, "DASH" if audio_url else "FLV",
-            )
-        except Exception as e:
-            self._room_panel.set_status("画质切换失败: " + str(e)[:30], "#f44336")
-            logging.error("Quality switch error: %s", e)
+            bi["quality_map"] = quality_map
+            actual_desc = quality_map[str(new_qn)]
+            self._controls.set_video_quality(actual_desc, quality_map)
+            self._controls._quality_label.setText("画质: 加载中")
+            self._room_panel.set_status("正在加载: " + actual_desc, "#FFD54F")
+            logging.info("Bilibili stream selected: qn=%s", new_qn)
+        except Exception as exc:
+            self._restore_quality_controls(bi)
+            self._room_panel.set_status("视频流加载失败: " + type(exc).__name__, "#f44336")
 
 
     def _on_page_change(self, page_idx):
         """Switch to a different episode / page of a B站 video."""
+        self._invalidate_quality_request()
         bi = self._bili_info
         if not bi or not bi.get("pages"):
             return
@@ -1014,8 +906,6 @@ class MainWindow(QMainWindow):
             self._room_panel.set_status("分P切换失败", "#f44336")
             return
 
-        bi["cid"] = new_cid
-
         try:
             video_url, audio_url, actual_qn, quality_map = self._fetch_bilibili_streams(
                 bi["avid"], new_cid, bi["current_qn"], bi["headers"]
@@ -1027,13 +917,14 @@ class MainWindow(QMainWindow):
             if audio_url:
                 self._player.load_dash(video_url, audio_url, resume_play=True, seek_pos=0)
             else:
-                self._player.load(video_url)
+                self._player.replace_flv(video_url, 0, True)
 
+            bi["cid"] = new_cid
             bi["current_qn"] = actual_qn
             if quality_map:
-                bi["quality_map"].update(quality_map)
+                bi["quality_map"] = quality_map
             current_desc = bi["quality_map"].get(str(actual_qn), str(actual_qn) + "P")
-            self._controls.set_video_quality(current_desc, list(bi["quality_map"].values()))
+            self._controls.set_video_quality(current_desc, bi["quality_map"])
             self._room_panel.set_status("切换到: " + page_title, "#4CAF50")
             if self._room_code and video_url:
                 self._network.send({"type": "load", "path": video_url})
@@ -1127,6 +1018,9 @@ class MainWindow(QMainWindow):
             self._controls.raise_()
 
     def _hide_fs_controls(self):
+        if self._controls.is_editing_time:
+            self._fs_timer.start(3000)
+            return
         if self.isFullScreen():
             self._controls.hide()
 
@@ -1159,6 +1053,10 @@ class MainWindow(QMainWindow):
                 self._danmaku.show_danmaku("字幕", "已加载")
 
     def closeEvent(self, event):
+        self._invalidate_quality_request()
+        self._fs_timer.stop()
+        self._fs_mouse_timer.stop()
+        QApplication.instance().removeEventFilter(self)
         self._vid_info_timer.stop()
         self._danmaku.close()
         self._player.stop()

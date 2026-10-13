@@ -1,12 +1,13 @@
 ﻿"""Playback controls bar -- compact redesign V3."""
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QSlider, QLabel,
-    QFileDialog, QLineEdit, QComboBox, QMenu, QFrame, QDialog, QDialogButtonBox,
+    QFileDialog, QLineEdit, QComboBox, QMenu, QFrame, QDialog, QDialogButtonBox, QStackedWidget, QToolTip,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QEvent
 from PySide6.QtWidgets import QStyle, QStyleOptionSlider
 from PySide6.QtGui import QPixmap, QCursor
 import os as _os, sys as _sys
+from app.timecode import parse_timecode, format_timecode
 
 if getattr(_sys, "frozen", False):
     _B = _sys._MEIPASS
@@ -54,6 +55,7 @@ class ControlsBar(QWidget):
         super().__init__(parent)
         self._dragging_seek = False
         self._duration = 0.0
+        self._position = 0.0
         self._muted = False
         self._vol_before_mute = 80
         self._audio_tracks = []
@@ -106,9 +108,22 @@ class ControlsBar(QWidget):
         # -- time --
         self._time_label = QLabel("00:00 / 00:00")
         self._time_label.setObjectName("time_label")
-        self._time_label.setFixedWidth(105)
         self._time_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._time_label)
+        self._time_label.setCursor(Qt.PointingHandCursor)
+        self._time_label.setToolTip("点击输入时间跳转（秒数、分:秒、时:分:秒）")
+        self._time_label.installEventFilter(self)
+        self._time_editor = QLineEdit()
+        self._time_editor.setAlignment(Qt.AlignCenter)
+        self._time_editor.setMaxLength(12)
+        self._time_editor.setAccessibleName("跳转到时间")
+        self._time_editor.setToolTip("回车跳转，Esc取消")
+        self._time_editor.returnPressed.connect(self._submit_time)
+        self._time_editor.installEventFilter(self)
+        self._time_stack = QStackedWidget()
+        self._time_stack.setFixedWidth(115)
+        self._time_stack.addWidget(self._time_label)
+        self._time_stack.addWidget(self._time_editor)
+        layout.addWidget(self._time_stack)
 
         # -- seek --
         self._seek_bar = QSlider(Qt.Horizontal)
@@ -121,6 +136,7 @@ class ControlsBar(QWidget):
 
         # -- danmaku input --
         self._danmaku_input = QLineEdit()
+        self._danmaku_input.setMaxLength(4000)
         self._danmaku_input.setFixedWidth(120)
         self._danmaku_input.setStyleSheet("background-color: #2a2a2a; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 2px 6px; font-size: 11px;")
         self._danmaku_input.setPlaceholderText("发个弹幕...")
@@ -226,7 +242,21 @@ class ControlsBar(QWidget):
     #  event filter (volume popup)
     # ================================================================
     def eventFilter(self, obj, event):
-        if obj == self._seek_bar and event.type() == QEvent.MouseButtonPress:
+        if obj is getattr(self, "_time_label", None) and event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.LeftButton:
+                self._time_editor.setText(format_timecode(self._position))
+                self._time_editor.setStyleSheet("")
+                self._time_stack.setCurrentWidget(self._time_editor)
+                self._time_editor.setFocus()
+                self._time_editor.selectAll()
+                return True
+        if obj is getattr(self, "_time_editor", None):
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+                self._cancel_time()
+                return True
+            if event.type() == QEvent.FocusOut:
+                self._cancel_time()
+        if obj == getattr(self, "_seek_bar", None) and event.type() == QEvent.MouseButtonPress:
             # Check if clicking on handle (allow drag) or track (click-to-seek)
             pos_x = event.position().x()
             opt = QStyleOptionSlider()
@@ -259,6 +289,25 @@ class ControlsBar(QWidget):
             elif event.type() == QEvent.Leave:
                 self._vol_hide_timer.start(500)
         return super().eventFilter(obj, event)
+
+    @property
+    def is_editing_time(self):
+        return self._time_stack.currentWidget() is self._time_editor
+
+    def _cancel_time(self):
+        self._time_stack.setCurrentWidget(self._time_label)
+        QToolTip.hideText()
+
+    def _submit_time(self):
+        try:
+            position = parse_timecode(self._time_editor.text(), self._duration)
+        except ValueError as exc:
+            self._time_editor.setStyleSheet("border: 1px solid #f44336;")
+            QToolTip.showText(self._time_editor.mapToGlobal(QPoint(0, 0)), str(exc), self._time_editor)
+            self._time_editor.selectAll()
+            return
+        self._cancel_time()
+        self.seek_requested.emit(position)
 
     def _show_vol_popup(self):
         pos = self._vol_btn.mapToGlobal(QPoint(0, 0))
@@ -407,12 +456,15 @@ class ControlsBar(QWidget):
         self._quality_combo.blockSignals(True)
         self._quality_combo.clear()
         if qualities:
-            self._quality_list = list(qualities)
+            self._quality_list = list(qualities.values()) if isinstance(qualities, dict) else list(qualities)
             self._current_quality = label
-            self._quality_combo.addItems(qualities)
+            if isinstance(qualities, dict):
+                for qn, description in qualities.items():
+                    self._quality_combo.addItem(description, str(qn))
+            else:
+                self._quality_combo.addItems(qualities)
             idx = self._quality_combo.findText(label)
-            if idx >= 0:
-                self._quality_combo.setCurrentIndex(idx)
+            self._quality_combo.setCurrentIndex(idx)
             self._quality_combo.show()
         else:
             self._quality_list = []
@@ -425,8 +477,10 @@ class ControlsBar(QWidget):
         if not text:
             return
         self._current_quality = text
-        self._quality_label.setText("\u753B\u8D28: " + text)
-        self.quality_selected.emit(text)
+        self.quality_selected.emit(self._quality_combo.currentData() or text)
+
+    def set_quality_busy(self, busy):
+        self._quality_combo.setEnabled(not busy)
 
     def set_pages(self, pages, current_idx=0):
         self._page_list = pages[:] if pages else []
@@ -440,14 +494,13 @@ class ControlsBar(QWidget):
 
     def set_position(self, pos: float, duration: float):
         self._duration = duration
+        self._position = pos
         if not self._dragging_seek and duration > 0:
             self._seek_bar.blockSignals(True)
             self._seek_bar.setValue(int(pos / duration * 1000))
             self._seek_bar.blockSignals(False)
-        p_m, p_s = int(pos // 60), int(pos % 60)
-        d_m = int(duration // 60) if duration > 0 else 0
-        d_s = int(duration % 60) if duration > 0 else 0
-        self._time_label.setText(f"{p_m:02d}:{p_s:02d} / {d_m:02d}:{d_s:02d}")
+        self._time_label.setText(format_timecode(pos) + " / " + format_timecode(duration))
+        self._time_stack.setFixedWidth(155 if max(pos, duration) >= 3600 else 115)
 
 
     # ================================================================
