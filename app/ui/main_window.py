@@ -16,6 +16,7 @@ from app.bilibili import BilibiliClient, BilibiliError, QualityUnavailable
 from app.ui.room_panel import RoomPanel
 from app.ui.controls import ControlsBar
 from app.ui.danmaku import DanmakuOverlay
+from app.version import CLIENT_NAME
 
 logging.basicConfig(level=logging.INFO)
 
@@ -79,7 +80,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("超时空会夜机")
+        self.setWindowTitle(CLIENT_NAME)
         self.resize(1280, 800)
         self.setMinimumSize(960, 600)
         self.setStyleSheet(STYLE)

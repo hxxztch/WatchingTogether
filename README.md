@@ -74,9 +74,27 @@ ngrok 会提供一个公网地址（例如 `https://xxx.ngrok-free.dev`），将
 python client.py
 ```
 
-### 本地测试版：联机稳定性更新
+### 客户端1.4.0 / 服务端1.2.0便携包
 
-当前源码包含待测试的 1.3.2 改动，客户端和服务端需要一起更新。已有的 1.3.1 EXE 和安装包不包含本次修改。
+Windows 10/11 64位用户完整解压对应ZIP，双击“超时空会夜机1.4.0.exe”或“server-1.2.0.exe”即可，无需安装Python或其他依赖。请保留EXE旁的`_internal`文件夹；两端均使用新版本。个人配置在首次运行后自动生成，不随发行包提供。
+
+由一人运行服务端，其他客户端填写`ws://服务端局域网或虚拟局域网IP:9877`。同机使用`ws://127.0.0.1:9877`。互联网访问仍需要网络可达性，便携包不自带VPN或公网穿透服务。
+
+构建说明：使用Python 3.8 x64建立独立虚拟环境，安装`packaging/requirements-lock.txt`，然后执行：
+
+```bash
+python -m pip install pip==25.0.1
+python -m pip install -r packaging/requirements-lock.txt
+python packaging/build_release.py build
+python packaging/verify_release.py
+python packaging/build_release.py archive --output dist/archives
+```
+
+验证脚本将完整包复制到仓库外的临时目录，清除Python、Conda、Qt路径环境变量，直接运行EXE检查原生Qt、mpv、音量、时间跳转、两客户端联机和断线恢复。
+
+### 联机稳定性与播放更新
+
+此前1.3.2本地改动已整合到客户端1.4.0和服务端1.2.0，客户端和服务端需要一起更新。已有的1.3.1 EXE和安装包不包含这些修改。
 
 两人处于同一局域网或可互访的虚拟局域网时，由一人运行 `python server.py`。其他人在客户端填写 `ws://服务端的虚拟局域网IP:9877`，刷新连接后创建或加入房间；服务端电脑需允许 TCP 9877 入站。
 

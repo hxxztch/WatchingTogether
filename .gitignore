@@ -13,3 +13,6 @@ crash.log
 vc_redist.x64.exe
 config.json
 .film-config-*.tmp
+.venv-packaging/
+!packaging/*.spec
+build_dependencies.log

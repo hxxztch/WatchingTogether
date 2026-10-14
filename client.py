@@ -37,6 +37,14 @@ from app.ui.main_window import MainWindow
 
 
 def main():
+    if "--package-check" in sys.argv:
+        import argparse
+        from app.package_check import run
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--package-check", required=True, metavar="REPORT_JSON")
+        parser.add_argument("--check-server", default="ws://127.0.0.1:9877")
+        options = parser.parse_args()
+        sys.exit(run(options.package_check, options.check_server))
     app = QApplication(sys.argv)
 
     # Set application icon (taskbar icon on Windows)

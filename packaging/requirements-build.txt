@@ -1,0 +1,8 @@
+# Versions already validated by the project; build in a clean Python 3.8 x64 venv.
+PyInstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
+PySide6==6.6.3.1
+python-mpv==1.0.6
+websockets==13.1
+yt-dlp==2024.10.22
+segno==1.6.6

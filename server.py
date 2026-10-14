@@ -10,6 +10,7 @@ import math
 import random
 import secrets
 import time
+from app.version import SERVER_VERSION
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
@@ -315,13 +316,24 @@ class Server:
             self._detach(room, member, peer)
 
 
-async def main():
+async def main(host="0.0.0.0", port=9877):
     async with Server() as server:
-        log.info("Server starting on 0.0.0.0:9877")
-        async with serve(server.handle, "0.0.0.0", 9877, ping_interval=10,
+        log.info("server-%s starting on %s:%s", SERVER_VERSION, host, port)
+        log.info("Clients on this computer: ws://127.0.0.1:%s", port)
+        log.info("Other computers: ws://<this PC's LAN or VPN IP>:%s ; Ctrl+C to stop", port)
+        async with serve(server.handle, host, port, ping_interval=10,
                          ping_timeout=30, close_timeout=2, max_size=65536) as listener:
             await listener.serve_forever()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser(description="WatchingTogether standalone room server")
+    parser.add_argument("--version", action="version", version="server-" + SERVER_VERSION)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=9877)
+    args = parser.parse_args()
+    try:
+        asyncio.run(main(args.host, args.port))
+    except KeyboardInterrupt:
+        pass
