@@ -2,6 +2,10 @@
 
 > 基于 WebSocket 的异地同步观影桌面应用
 
+当前分支为一体化预览，保留原版及界面预览目录。左侧「房间」可以创建内置房间、通过邀请链接加入，或切回原服务器连接方式。房主退出解散房间；异地模式使用经确认的 Cloudflare 临时公共通道，无需自行部署服务器，但公共服务不保证可用性。
+
+单客户端下载、构建、附件方案对比及已知验收边界见 [一体化方案与验收](一体化方案与验收.txt)。构建用 `python packaging/build_integrated.py build`；以下旧版独立服务端说明继续适用于原连接模式。
+
 ![Python](https://img.shields.io/badge/Python-3.8-blue)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green)
 ![WebSocket](https://img.shields.io/badge/WebSocket-Async-orange)

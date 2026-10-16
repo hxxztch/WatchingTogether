@@ -83,6 +83,17 @@ class SocketTests(unittest.IsolatedAsyncioTestCase):
         await until(lambda: client._ready)
         return client, events, errors, latencies
 
+    async def test_integrated_client_stops_after_host_unreachable_deadline(self):
+        host, info = await self.host()
+        client, events, errors, latencies = await self.worker(info['room'])
+        client.recovery_timeout = .1
+        self.listener.close()
+        await self.listener.wait_closed()
+        await until(lambda: any(event['type'] == 'room_closed' for event in events))
+        await until(lambda: not client.isRunning())
+        self.assertIsNone(client._session)
+        self.assertFalse(client._ready)
+
     async def test_abrupt_disconnect_cleans_members_and_resumes_identity(self):
         host, info = await self.host()
         guest = await self.socket()

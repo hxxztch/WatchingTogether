@@ -27,7 +27,7 @@ class NetworkClient(QThread):
     COMMAND_TTL = 5
     SYNC_INTERVAL = 2
 
-    def __init__(self, url="ws://localhost:9877", parent=None):
+    def __init__(self, url="ws://localhost:9877", parent=None, recovery_timeout=None):
         super().__init__(parent)
         self.url = url
         self.signals = NetworkSignals()
@@ -47,6 +47,8 @@ class NetworkClient(QThread):
         self._clock_offset = None
         self._best_rtt = None
         self._protocol = 1
+        self.recovery_timeout = recovery_timeout
+        self._disconnected_since = None
 
     def run(self):
         self._loop = asyncio.new_event_loop()
@@ -68,6 +70,14 @@ class NetworkClient(QThread):
     async def _connect_loop(self):
         failures = 0
         while not self._stopping.is_set():
+            if (self._session and self.recovery_timeout is not None and
+                    self._disconnected_since is not None and
+                    time.monotonic() - self._disconnected_since > self.recovery_timeout):
+                self._forget_session()
+                self._stopping.set()
+                self.signals.message_received.emit({'type': 'room_closed',
+                    'message': '房主连接长时间未恢复，已退出房间，请获取新的邀请后重试。'})
+                break
             connected_at = None
             tasks = []
             try:
@@ -111,6 +121,8 @@ class NetworkClient(QThread):
                 self._pending_controls.clear()
                 self._sync_requests.clear()
                 if connected_at is not None:
+                    if self._disconnected_since is None:
+                        self._disconnected_since = time.monotonic()
                     self.signals.disconnected.emit()
             if self._stopping.is_set():
                 break
@@ -237,6 +249,8 @@ class NetworkClient(QThread):
             except (ValueError, TypeError):
                 continue
             self._handle_message(msg)
+            if self._stopping.is_set():
+                return
 
     def _handle_message(self, msg):
         mtype = msg.get("type")
@@ -255,14 +269,17 @@ class NetworkClient(QThread):
                              "token": msg.get("token"), "chat_seq": msg.get("chat_seq", 0)}
             self._protocol = msg.get("protocol", 1)
             self._ready = True
+            self._disconnected_since = None
             self._expire_chats()
             if self._protocol >= 2:
                 for _, message in self._pending_chats.values():
                     self._put(message)
             self._request_state()
-        elif mtype == "session_expired":
+        elif mtype in ("session_expired", "room_closed"):
             self._forget_session()
             self._membership_pending = False
+            if mtype == "room_closed":
+                self._stopping.set()
         elif mtype == "left_room":
             self._forget_session()
             self._membership_pending = False

@@ -26,6 +26,9 @@ QLabel#room_label { color: #b86b43; font-size: 18px; font-weight: 600; }
 QLabel#time_label { color: #675d54; background: rgba(255, 255, 255, 210); border-radius: 6px; padding: 4px; }
 QLineEdit { background: #fcfaf7; border: 1px solid #e3d9cf; border-radius: 7px; padding: 7px 9px; selection-background-color: #d99c76; }
 QLineEdit:focus { border: 1px solid #c78258; background: #fff; }
+QComboBox { background: #fcfaf7; border: 1px solid #e3d9cf; border-radius: 7px; padding: 7px 9px; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: white; color: #3f3731; selection-background-color: #eedbc9; }
 QPushButton { background: rgba(255, 255, 255, 205); color: #675547; border: 1px solid rgba(210, 205, 200, 170); border-radius: 7px; padding: 7px 12px; }
 QPushButton:hover { background: rgba(255, 255, 255, 240); border-color: #c8b8a9; }
 QPushButton:pressed { background: rgba(245, 242, 238, 230); }
@@ -70,6 +73,10 @@ def line_icon(kind, color="#987a63"):
         painter.drawLine(10, 8, 15, 11)
         painter.drawLine(15, 11, 10, 14)
         painter.drawLine(10, 14, 10, 8)
+    elif kind == "room":
+        painter.drawEllipse(8, 3, 8, 8)
+        painter.drawArc(4, 12, 16, 12, 0, 180 * 16)
+        painter.drawLine(4, 18, 20, 18)
     else:
         painter.drawLine(9, 7, 14, 12)
         painter.drawLine(14, 12, 9, 17)
@@ -123,7 +130,7 @@ class DesktopShell(QWidget):
         side.addLayout(brand_row)
         side.addSpacing(28)
         self.nav_buttons = []
-        for index, (text, icon) in enumerate((("首页", "home"), ("播放影厅", "cinema"))):
+        for index, (text, icon) in enumerate((("首页", "home"), ("播放影厅", "cinema"), ("房间", "room"))):
             button = QToolButton()
             button.setObjectName("nav")
             button.setText(text)
@@ -165,6 +172,15 @@ class DesktopShell(QWidget):
         theatre_layout.addWidget(self.theatre_header)
         theatre_layout.addWidget(theatre, 1)
         self.pages.addWidget(theatre_page)
+        rooms = QScrollArea()
+        rooms.setWidgetResizable(True)
+        room_page = QWidget()
+        room_layout = QVBoxLayout(room_page)
+        room_layout.setContentsMargins(24, 24, 24, 24)
+        room_layout.addWidget(owner._room_panel.management, 0, Qt.AlignTop)
+        room_layout.addStretch()
+        rooms.setWidget(room_page)
+        self.pages.addWidget(rooms)
         root.addWidget(self.pages, 1)
         self._theatre_layout = theatre_layout
         self.set_page(0)

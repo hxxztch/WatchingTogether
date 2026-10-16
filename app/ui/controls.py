@@ -245,33 +245,21 @@ class ControlsBar(QWidget):
     #  more menu rebuild
     # ================================================================
     def _rebuild_more_menu(self):
-        self._more_menu.clear()
-
-
-        # Bilibili login
-        bili_text = "登录bilibili"
-        if self._bili_logged_in:
-            bili_text += " (已登录)"
-        self._more_menu.addAction(bili_text, self._on_bili_menu)
-        self._more_menu.addSeparator()
-        # Audio
-        a_m = self._more_menu.addMenu("\u97F3\u8F68")
-        if self._audio_tracks:
-            for tid, label in self._audio_tracks:
-                a_m.addAction(label, lambda checked=False, t=tid: self.audio_selected.emit(t))
-        else:
-            act = a_m.addAction("\u6682\u65E0\u97F3\u8F68")
-            act.setEnabled(False)
-        self._more_menu.addSeparator()
-
-        # Page
-        p_m = self._more_menu.addMenu("\u5206P")
-        if self._page_list and len(self._page_list) > 1:
-            for idx, title in self._page_list:
-                p_m.addAction(title, lambda checked=False, i=idx: self.page_changed.emit(i))
-        else:
-            act = p_m.addAction("\u6682\u65E0\u5206P")
-            act.setEnabled(False)
+        self._bili_btn.setText('bilibili · 已登录' if self._bili_logged_in else '登录 bilibili')
+        self._bili_btn.setToolTip(self._bili_uname if self._bili_logged_in else '扫码登录或管理账号')
+        for combo, values, empty in ((self._audio_combo, self._audio_tracks, '暂无音轨'),
+                                     (self._page_combo, self._page_list, '暂无分 P')):
+            selected = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for key, title in values:
+                combo.addItem(title, key)
+            if not values:
+                combo.addItem(empty)
+            index = combo.findData(selected)
+            combo.setCurrentIndex(max(0, index))
+            combo.setEnabled(bool(values))
+            combo.blockSignals(False)
 
     # ================================================================
     #  public setters
@@ -279,6 +267,9 @@ class ControlsBar(QWidget):
     def set_audio_tracks(self, tracks, current_id=-1):
         self._audio_tracks = tracks[:] if tracks else []
         self._rebuild_more_menu()
+        index = self._audio_combo.findData(current_id)
+        if index >= 0:
+            self._audio_combo.setCurrentIndex(index)
 
     def set_video_quality(self, label="", qualities=None):
         self._quality_label.setText("\u753B\u8D28: " + (label if label else "—"))
@@ -314,6 +305,9 @@ class ControlsBar(QWidget):
     def set_pages(self, pages, current_idx=0):
         self._page_list = pages[:] if pages else []
         self._rebuild_more_menu()
+        index = self._page_combo.findData(current_idx)
+        if index >= 0:
+            self._page_combo.setCurrentIndex(index)
 
     # ================================================================
     #  state updates

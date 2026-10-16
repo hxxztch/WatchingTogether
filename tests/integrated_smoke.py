@@ -1,0 +1,122 @@
+"""Native Qt/mpv integrated-room acceptance. --public exercises real Quick Tunnel."""
+import os
+from pathlib import Path
+import sys
+import tempfile
+import time
+import traceback
+
+os.environ['QT_QPA_PLATFORM'] = 'windows'
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from app.runtime import configure_runtime
+configure_runtime()
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QPushButton
+from app.ui.main_window import MainWindow
+import app.config as config
+
+
+def main():
+    public = '--public' in sys.argv
+    app = QApplication([])
+    failures = []
+    def report(kind, value, tb):
+        failures.append(kind.__name__)
+        traceback.print_exception(kind, value, tb)
+    sys.excepthook = report
+    def wait(check, timeout=10):
+        deadline = time.monotonic() + timeout
+        while not check():
+            app.processEvents()
+            assert not failures, failures
+            assert time.monotonic() < deadline, 'Integrated condition timed out'
+            time.sleep(.02)
+        app.processEvents()
+    windows = []
+    with tempfile.TemporaryDirectory(prefix='film-integrated-') as tmp:
+        config.CONFIG_PATH = str(Path(tmp) / 'config.json')
+        media = Path(tmp) / 'integrated.y4m'
+        media.write_bytes(b'YUV4MPEG2 W160 H160 F25:1 Ip A1:1 C420jpeg\n' +
+                          (b'FRAME\n' + bytes([190]) * 25600 + bytes([128]) * 12800) * 1000)
+        try:
+            host = MainWindow()
+            guest = MainWindow()
+            windows.extend((host, guest))
+            host.show()
+            host._switch_page(2)
+            assert not host._network.isRunning(), 'Offline startup must not retry a server'
+            host._room_panel.mode.setCurrentIndex(0 if public else 1)
+            host._room_panel._name_input.setText('owner')
+            assert host._room_panel._name_input.isVisible(), 'Room entry must be visible'
+            QTest.mouseClick(host._room_panel.management.findChild(QPushButton, 'create_btn'), Qt.LeftButton)
+            wait(lambda: host._room_ready)
+            wait(lambda: bool(host._room_panel.invitation.text()) or
+                         host._room_panel.retry_tunnel.isEnabled() and host._rooms.tunnel is not None, 70)
+            invitation = host._room_panel.invitation.text()
+            assert invitation, host._room_panel.tunnel_status.text()
+            if public:
+                from urllib.parse import urlsplit
+                print('Public hostname: ' + str(urlsplit(invitation).hostname), flush=True)
+            guest._on_join_room(invitation, 'viewer')
+            wait(lambda: guest._room_ready, 95 if public else 35)
+            wait(lambda: host._room_panel._member_list.count() == 2)
+            print('PASS: actual public WebSocket route' if public else 'PASS: authenticated LAN invitation', flush=True)
+            generation = guest._network._generation
+            token = guest._network._session['token']
+            guest._network._loop.call_soon_threadsafe(guest._network._ws.transport.abort)
+            wait(lambda: guest._network._generation > generation and guest._room_ready and guest._network._ready, 20)
+            assert guest._network._session['token'] == token
+            assert guest._my_name == 'viewer'
+            print('PASS: dropped guest connection resumes the same member without suffix', flush=True)
+            for window in windows:
+                window._on_load_file(media.as_posix())
+            wait(lambda: all(w._player.duration > 0 and not w._player.is_loading for w in windows))
+            host._network.send({'type': 'pause', 'position': 10})
+            wait(lambda: all(abs(w._player.position - 10) < .3 and not w._player.is_playing for w in windows))
+            host._switch_page(1)
+            QTest.keyClick(host._player, Qt.Key_Right)
+            wait(lambda: all(abs(w._player.position - 15) < .3 for w in windows))
+            QTest.keyClick(host._player, Qt.Key_Left)
+            wait(lambda: all(abs(w._player.position - 10) < .3 for w in windows))
+            guest._on_chat('integration-check')
+            wait(lambda: any('integration-check' in host._room_panel._chat_list.item(i).text()
+                             for i in range(host._room_panel._chat_list.count())))
+            host._on_toggle_play()
+            wait(lambda: all(w._player.is_playing for w in windows))
+            old_player = host._player._player
+            host._switch_page(2)
+            wait(lambda: host._pip.isVisible())
+            assert host._player._player is old_player
+            # Screenshots exclude invitations/ephemeral credentials.
+            host._room_panel.invitation.setText('[invitation hidden for review]')
+            output = ROOT / 'build' / 'integrated-review'
+            output.mkdir(parents=True, exist_ok=True)
+            host.grab().save(str(output / 'rooms.png'))
+            host._switch_page(1)
+            QTest.qWait(250)
+            host.grab().save(str(output / 'theatre.png'))
+            host._on_leave_room()
+            wait(lambda: not guest._room_code and not guest._network.isRunning())
+            assert host._rooms.host is None and host._rooms.tunnel is None
+            assert '解散' in guest._room_panel._status.text()
+            print('PASS: +/-5 sync, chat, Rooms PiP, host disband and worker cleanup', flush=True)
+            # Recreate and cancel while startup is pending: no late signals revive a room.
+            host._room_panel.mode.setCurrentIndex(1)
+            host._on_create_room('owner')
+            host._rooms.cancel()
+            QTest.qWait(250)
+            assert host._rooms.host is None and not host._room_code
+            print('PASS: cancel during startup', flush=True)
+        finally:
+            for window in windows:
+                window.close()
+                if window._player._player:
+                    window._player._player.terminate()
+            app.processEvents()
+    assert not failures
+
+
+if __name__ == '__main__':
+    main()

@@ -42,7 +42,7 @@ def main():
         from app.package_check import run
         parser = argparse.ArgumentParser()
         parser.add_argument("--package-check", required=True, metavar="REPORT_JSON")
-        parser.add_argument("--check-server", default="ws://127.0.0.1:9877")
+        parser.add_argument("--check-server", default=None)
         options = parser.parse_args()
         sys.exit(run(options.package_check, options.check_server))
     app = QApplication(sys.argv)

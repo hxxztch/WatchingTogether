@@ -72,7 +72,7 @@ def main():
                           (b"FRAME\n" + bytes([128]) * 384) * 500)
         try:
             for _ in range(3):
-                window = MainWindow()
+                window = MainWindow(legacy_autoconnect=True)
                 window._switch_page(1)
                 windows.append(window)
                 player = mpv.MPV(vo="null", ao="null", keep_open="yes", pause=True)

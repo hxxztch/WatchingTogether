@@ -8,7 +8,7 @@ import time
 import traceback
 
 
-def run(report_path, server_url):
+def run(report_path, server_url=None):
     result = {'ok': False, 'frozen': bool(getattr(sys, 'frozen', False)), 'checks': []}
     windows = []
     original_init = None
@@ -55,18 +55,17 @@ def run(report_path, server_url):
 
         with tempfile.TemporaryDirectory(prefix='film-package-check-') as folder:
             config.CONFIG_PATH = str(Path(folder) / 'config.json')
-            assert config.save(server=server_url)
+            assert config.save(server=server_url or 'ws://127.0.0.1:9877')
             media = Path(folder) / '本地 视频.y4m'
             media.write_bytes(b'YUV4MPEG2 W16 H16 F25:1 Ip A1:1 C420jpeg\n' +
                               (b'FRAME\n' + bytes([128]) * 384) * 500)
             try:
                 for _ in range(2):
-                    window = MainWindow()
+                    window = MainWindow(legacy_autoconnect=bool(server_url))
                     window._switch_page(1)
                     windows.append(window)
                     window._on_load_file(media.as_posix())
-                wait_for(lambda: all(not w._player.is_loading and w._player.duration > 0 and
-                                     w._network._ws is not None for w in windows))
+                wait_for(lambda: all(not w._player.is_loading and w._player.duration > 0 for w in windows))
                 host, guest = windows
                 host._player.pause()
                 guest._player.pause()
@@ -77,9 +76,17 @@ def run(report_path, server_url):
                 controls._on_vol_toggle()
                 assert host._player.volume == 37
                 result['checks'].append('native Qt platform, mpv decoding, local forward-slash path, volume')
+                if not server_url:
+                    host._room_panel.mode.setCurrentIndex(1)
                 host._on_create_room('package-host')
                 wait_for(lambda: host._room_ready)
-                guest._on_join_room(host._room_code, 'package-guest')
+                if server_url:
+                    guest._on_join_room(host._room_code, 'package-guest')
+                else:
+                    from app.hosting import make_invitation
+                    service = host._rooms.host
+                    invitation = make_invitation('ws://127.0.0.1:' + str(service.port) + service.guest_path, host._room_code)
+                    guest._on_join_room(invitation, 'package-guest')
                 wait_for(lambda: guest._room_ready)
                 controls.set_position(0, 20)
                 controls._time_editor.setText('00:04')
@@ -96,6 +103,20 @@ def run(report_path, server_url):
                 host._on_seek(0)
                 wait_for(lambda: guest._room_ready and not guest._player.is_playing and guest._player.position < .25)
                 result['checks'].append('real socket disconnect/resume, paused zero')
+                if not server_url:
+                    host._on_leave_room()
+                    wait_for(lambda: not guest._room_code and not guest._network.isRunning())
+                    result['checks'].append('embedded server in client, authenticated invitation, owner disband')
+                if getattr(sys, 'frozen', False):
+                    import hashlib
+                    import subprocess
+                    from app.tunnel import CLOUDFLARED_SHA256
+                    helper = Path(sys._MEIPASS) / 'tools/cloudflared.exe'
+                    assert hashlib.sha256(helper.read_bytes()).hexdigest() == CLOUDFLARED_SHA256
+                    check = subprocess.run([str(helper), '--version'], capture_output=True,
+                                           timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+                    assert check.returncode == 0 and b'2026.10.1' in check.stdout
+                    result['checks'].append('bundled cloudflared hash and native executable startup')
             finally:
                 for window in windows:
                     window.close()

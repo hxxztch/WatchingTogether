@@ -55,7 +55,7 @@ def main():
         config.CONFIG_PATH = str(Path(temporary) / 'config.json')
         config.save(server='ws://127.0.0.1:1', bili_cookie=cookie)
         with patch.object(mpv.MPV, '__init__', null_init):
-            window = MainWindow()
+            window = MainWindow(legacy_autoconnect=True)
             window._switch_page(1)
             window._network.stop()
             try:

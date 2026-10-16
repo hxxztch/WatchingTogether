@@ -32,9 +32,9 @@ class MainWindow(QMainWindow):
     _hotkey = Signal(str)
     _quality_result = Signal(int, object)
 
-    def __init__(self):
+    def __init__(self, legacy_autoconnect=False):
         super().__init__()
-        self.setWindowTitle(CLIENT_NAME + " · 界面预览")
+        self.setWindowTitle(CLIENT_NAME + " · 一体化预览")
         self.resize(1440, 900)
         self.setMinimumSize(1120, 720)
         self.setStyleSheet(WARM_STYLE)
@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(_pix))
 
         self._room_code = ""
+        self._closing = False
         self._room_ready = False
         self._playback_sync = PlaybackSynchronizer()
         self._bili_info = None  # {bvid, avid, cid, headers, quality_map, current_qn}
@@ -55,6 +56,11 @@ class MainWindow(QMainWindow):
         self._syncing = False
 
         self._room_panel = RoomPanel()
+        from app.room_controller import RoomController
+        self._rooms = RoomController(self)
+        self._room_panel.cancel_requested.connect(self._rooms.cancel)
+        self._room_panel.retry_tunnel.clicked.connect(self._rooms.retry_tunnel)
+        self._room_panel.lan_address.currentIndexChanged.connect(self._rooms.update_lan_invitation)
         self._room_panel.create_requested.connect(self._on_create_room)
         self._room_panel.join_requested.connect(self._on_join_room)
         self._room_panel.leave_requested.connect(self._on_leave_room)
@@ -82,7 +88,9 @@ class MainWindow(QMainWindow):
         self._network.signals.message_received.connect(self._on_message)
         self._network.signals.error_occurred.connect(self._on_net_error)
         self._network.signals.latency_updated.connect(self._on_latency)
-        self._network.start()
+        if legacy_autoconnect:
+            self._room_panel.mode.setCurrentIndex(2)
+            self._network.start()
 
         self._player = MpvWidget()
         self._player.position_changed.connect(self._on_position)
@@ -202,20 +210,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_network') and self._network:
             if not self._network.stop():
                 self._room_panel.set_status("连接仍在关闭，请稍后重试", "#f44336")
-                return
+                return False
             self._network.deleteLater()
         self._room_code = ""
         self._room_ready = False
         self._playback_sync = PlaybackSynchronizer()
         self._room_panel.set_in_room(False)
         self._player.set_speed(1.0)
-        self._network = NetworkClient(url)
+        self._network = NetworkClient(url, recovery_timeout=90 if self._rooms.integrated else None)
         self._network.signals.connected.connect(self._on_connected)
         self._network.signals.disconnected.connect(self._on_disconnected)
         self._network.signals.message_received.connect(self._on_message)
         self._network.signals.error_occurred.connect(self._on_net_error)
         self._network.signals.latency_updated.connect(self._on_latency)
         self._network.start()
+        return True
 
     def _player_volume(self, vol):
         if hasattr(self, "_player"):
@@ -246,12 +255,15 @@ class MainWindow(QMainWindow):
             self._controls.set_audio_tracks(tracks)
 
     def _on_connected(self):
-        if not self._current_network_event():
+        if not self._current_network_event() or self._network._stopping.is_set():
             return
+        self._rooms.connected()
         self._room_panel.set_status("正在恢复房间..." if self._room_code else "已连接", "#4CAF50")
         self._room_panel.update_server_label(self._room_panel.get_server_url())
     def _on_disconnected(self):
         if not self._current_network_event():
+            return
+        if self._network._stopping.is_set():
             return
         self._room_ready = False
         self._player.set_speed(1.0)
@@ -287,12 +299,15 @@ class MainWindow(QMainWindow):
         return source is None or source is self._network.signals
 
     def _on_net_error(self, err):
-        if self._current_network_event():
+        if self._current_network_event() and not self._network._stopping.is_set():
             self._room_panel.set_status(err, "#f44336")
 
     def _on_message(self, msg):
         if not self._current_network_event():
             return
+        if self._closing or (self._network._stopping.is_set() and msg.get('type') not in ('room_closed', 'left_room')):
+            return
+        self._rooms.message(msg)
         mtype = msg.get("type", "")
         self._syncing = True
         try:
@@ -312,12 +327,13 @@ class MainWindow(QMainWindow):
                 self._player.set_speed(1.0)
                 self._room_panel.set_in_room(False)
                 self._room_panel.set_status("已离开房间", "#999")
-            elif mtype == "session_expired":
+            elif mtype in ("session_expired", "room_closed"):
                 self._room_code = ""
                 self._room_ready = False
                 self._player.set_speed(1.0)
                 self._room_panel.set_in_room(False)
-                self._room_panel.set_status("房间已过期或服务端已重启，请重新创建或加入", "#FFD54F")
+                self._room_panel.set_status(msg.get('message', "房主已离开，房间已解散") if mtype == "room_closed" else
+                                            "房间已过期或服务端已重启，请重新创建或加入", "#95724f")
             elif mtype == "delivery_failed":
                 self._room_panel.add_chat("系统", msg["message"])
             elif mtype == "member_joined":
@@ -361,13 +377,28 @@ class MainWindow(QMainWindow):
 
     def _on_create_room(self, name):
         self._my_name = name
+        if self._room_panel.mode.currentIndex() != 2:
+            self._rooms.create(name)
+            return
+        if self._network._ws is None:
+            self._rooms.connect(self._room_panel.get_server_url(), {'type': 'create_room', 'name': name})
+            return
         self._network.send({"type": "create_room", "name": name})
 
     def _on_join_room(self, room, name):
         self._my_name = name
+        if self._room_panel.mode.currentIndex() != 2:
+            self._rooms.join(room, name)
+            return
+        if self._network._ws is None:
+            self._rooms.connect(self._room_panel.get_server_url(), {'type': 'join_room', 'room': room, 'name': name})
+            return
         self._network.send({"type": "join_room", "room": room, "name": name})
 
     def _on_leave_room(self):
+        if self._rooms.host is not None or self._rooms.integrated:
+            self._rooms.cancel()
+            return
         self._network.send({"type": "leave_room"})
         self._room_code = ""
         self._room_ready = False
@@ -743,6 +774,8 @@ class MainWindow(QMainWindow):
 
 
     def _on_position(self, pos):
+        if self._closing:
+            return
         self._controls.set_position(pos, self._player.duration)
 
     def _on_hotkey(self, action):
@@ -871,9 +904,9 @@ class MainWindow(QMainWindow):
                 self._controls._vol_popup.isVisible())
 
     def _switch_page(self, index):
-        if index == 0 and self.isFullScreen():
+        if index != 1 and self.isFullScreen():
             self._exit_fullscreen()
-        if index == 0 and self._player.is_playing and self._player.duration > 0:
+        if index != 1 and self._player.is_playing and self._player.duration > 0:
             if not self._pip.isVisible():
                 self._video_layout.removeWidget(self._player)
                 self._pip.body.insertWidget(0, self._player, 1)
@@ -889,7 +922,7 @@ class MainWindow(QMainWindow):
             self._pip.hide()
             self._player.show()
         self._shell.set_page(index)
-        if index == 0:
+        if index != 1:
             self._controls.hide()
             self._controls._vol_popup.hide()
         self._shell.refresh_status()
@@ -938,6 +971,8 @@ class MainWindow(QMainWindow):
                 self._danmaku.show_danmaku("字幕", "已加载")
 
     def closeEvent(self, event):
+        self._closing = True
+        self._rooms.cancel()
         self._shell.timer.stop()
         self._pip.timer.stop()
         self._pip.hide()

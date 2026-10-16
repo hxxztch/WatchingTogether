@@ -26,6 +26,19 @@ from server import Server
 
 
 def main():
+    if '--logical-pointer' in sys.argv:
+        # Shared interactive desktops may move the real pointer during tests.
+        # This mode tests Qt behavior, not OS occlusion/hit-testing.
+        from unittest.mock import patch
+        pointer_position = [QPoint(0, 0)]
+        def set_position(*args):
+            pointer_position[0] = QPoint(args[0]) if len(args) == 1 else QPoint(*args)
+        pointer_patches = [patch.object(QCursor, 'setPos', side_effect=set_position),
+                           patch.object(QCursor, 'pos', side_effect=lambda: pointer_position[0]),
+                           patch.object(QApplication, 'widgetAt', side_effect=lambda *args: windows[0] if windows else None)]
+        for item in pointer_patches:
+            item.start()
+        print('Logical pointer mode: OS cursor/occlusion excluded from this run', flush=True)
     ready = queue.Queue()
     async def run_server():
         async with Server() as server:
@@ -58,8 +71,15 @@ def main():
         origin = widget.mapToGlobal(QPoint(0, 0))
         widget.screen().grabWindow(0, origin.x(), origin.y(), widget.width(), widget.height()).save(str(output / filename))
     def hover_controls(window):
-        QCursor.setPos(window._player.mapToGlobal(QPoint(window._player.width() // 2, window._player.height() - 24)))
-        wait(lambda: window._controls.isVisible())
+        target = window._player.mapToGlobal(QPoint(window._player.width() // 2, window._player.height() - 24))
+        QCursor.setPos(target)
+        try:
+            wait(lambda: window._controls.isVisible())
+        except AssertionError:
+            capture(window, 'hover-failure.png')
+            print('Hover diagnostic:', target, QCursor.pos(), QApplication.activeWindow(),
+                  QApplication.widgetAt(QCursor.pos()), window._controls_hovered(), flush=True)
+            raise
     def leave_controls(window):
         QCursor.setPos(window._shell.sidebar.mapToGlobal(QPoint(20, 200)))
     windows = []
@@ -72,7 +92,7 @@ def main():
         frame = bytes([200]) * (width * height) + bytes([128]) * (width * height // 2)
         media.write_bytes(b'YUV4MPEG2 W160 H160 F25:1 Ip A1:1 C420jpeg\n' + (b'FRAME\n' + frame) * 1000)
         try:
-            host = MainWindow()
+            host = MainWindow(legacy_autoconnect=True)
             windows.append(host)
             host.resize(1280, 800)
             host.show()
@@ -153,7 +173,7 @@ def main():
             assert not host._controls.isAncestorOf(host._controls._open_btn)
             host._controls._vol_slider_v.setValue(37)
             host._on_seek(4)
-            guest = MainWindow()
+            guest = MainWindow(legacy_autoconnect=True)
             windows.append(guest)
             guest._player._player = mpv.MPV(vo='null', ao='null', keep_open='yes')
             guest._player._setup_done = True

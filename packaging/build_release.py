@@ -46,9 +46,11 @@ SERVER_HELP = '''server-1.2.0 / Windows 10、11 64位便携版
 '''
 
 
-def build():
+def build(components=None):
     WORK.mkdir(parents=True, exist_ok=True)
     for component, name, help_text in [('server', SERVER_NAME, SERVER_HELP), ('client', CLIENT_NAME, CLIENT_HELP)]:
+        if components is not None and component not in components:
+            continue
         log = WORK / (component + '-build.log')
         with log.open('w', encoding='utf-8') as output:
             completed = subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm',
@@ -79,11 +81,11 @@ def build():
         print('Built: ' + str(package), flush=True)
 
 
-def archive(output):
+def archive(output, names=None):
     import hashlib
     output.mkdir(parents=True, exist_ok=True)
     hashes = []
-    for name in (CLIENT_NAME, SERVER_NAME):
+    for name in (names or (CLIENT_NAME, SERVER_NAME)):
         package = DIST / name
         target = output / (name + '.zip')
         if target.exists():

@@ -108,8 +108,10 @@ class Room:
 
 
 class Server:
-    def __init__(self, grace_period=60):
+    def __init__(self, grace_period=60, hosted=False):
         self.rooms = {}
+        self.hosted = hosted
+        self.owner_token = None
         self.grace_period = grace_period
         self._maintenance = None
 
@@ -126,9 +128,17 @@ class Server:
         for code, room in list(self.rooms.items()):
             for token, member in list(room.members.items()):
                 if member.peer is None and member.expires is not None and member.expires <= now:
+                    if self.hosted and token == self.owner_token:
+                        self.disband(room)
+                        break
                     del room.members[token]
             if not room.members:
-                del self.rooms[code]
+                self.rooms.pop(code, None)
+
+    def disband(self, room):
+        self.broadcast(room, {"type": "room_closed", "message": "房主已离开，房间已解散"})
+        self.rooms.pop(room.code, None)
+        room.members.clear()
 
     async def _maintain(self):
         while True:
@@ -151,6 +161,10 @@ class Server:
         # An old connection's finally must not remove its resumed replacement.
         if room is None or member is None or member.peer is not peer:
             return
+        if intentional and self.hosted and member.token == self.owner_token:
+            self.disband(room)
+            member.peer = None
+            return
         member.peer = None
         if intentional:
             room.members.pop(member.token, None)
@@ -168,8 +182,9 @@ class Server:
             raise ValueError("Position must be finite")
         return max(0.0, value)
 
-    async def handle(self, ws):
+    async def handle(self, ws, is_host=False):
         peer = Peer(ws)
+        peer.is_host = is_host
         peer.send({"type": "hello", "protocol": 2})
         reader = asyncio.create_task(self._receive(peer))
         writer = asyncio.create_task(peer.run())
@@ -207,6 +222,8 @@ class Server:
                                 peer.send({"type": "session_expired",
                                            "message": "Room session expired or server restarted"})
                                 continue
+                            if self.hosted and restored.token == self.owner_token and not peer.is_host:
+                                raise ValueError("Host connection required")
                             cursor = max(0, min(candidate.chat_seq, int(msg.get("chat_seq", 0))))
                             room, member = candidate, restored
                             old_peer = member.peer
@@ -219,6 +236,8 @@ class Server:
                         else:
                             name = str(msg.get("name", "")).strip()[:64] or "Anonymous"
                             if mtype == "create_room":
+                                if self.hosted and (not peer.is_host or self.rooms):
+                                    raise ValueError("Only the host can create this room")
                                 room = Room(self._generate_code())
                                 self.rooms[room.code] = room
                             else:
@@ -228,6 +247,8 @@ class Server:
                             member = Member(name, peer)
                             member.name = room.available_name(member.requested_name)
                             room.members[member.token] = member
+                            if self.hosted and mtype == "create_room":
+                                self.owner_token = member.token
                             cursor = room.chat_seq
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
                                    "room": room.code, "name": member.name,
@@ -251,7 +272,7 @@ class Server:
                         room = member = None
                         peer.send({"type": "left_room"})
                         continue
-                    if member is None or member.peer is not peer:
+                    if member is None or member.peer is not peer or room.code not in self.rooms:
                         raise ValueError("Join a room first")
                     message_id = msg.get("id")
                     if message_id is not None and (not isinstance(message_id, str) or len(message_id) > 64):
