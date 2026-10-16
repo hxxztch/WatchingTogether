@@ -109,6 +109,63 @@ class SocketTests(unittest.IsolatedAsyncioTestCase):
         await send(replacement, "sync_request", request_id="still-here")
         self.assertEqual((await receive(replacement, "sync_state"))["request_id"], "still-here")
 
+    async def test_repeated_disconnect_and_fresh_join_reuses_online_name(self):
+        host, info = await self.host()
+        for _ in range(4):
+            guest = await self.socket()
+            await send(guest, "join_room", room=info["room"], name="viewer", protocol=2)
+            joined = await receive(guest, "room_joined")
+            self.assertEqual(joined["name"], "viewer")
+            guest.transport.abort()
+            self.assertEqual((await receive(host, "member_left"))["members"], ["host"])
+        # Recovery tokens still exist, but don't occupy online display names.
+        self.assertEqual(len(self.server.rooms[info["room"]].members), 5)
+
+    async def test_explicit_leave_and_rejoin_does_not_accumulate_suffix(self):
+        host, info = await self.host()
+        guest = await self.socket()
+        for _ in range(4):
+            await send(guest, "join_room", room=info["room"], name="viewer", protocol=2)
+            joined = await receive(guest, "room_joined")
+            self.assertEqual(joined["name"], "viewer")
+            await send(guest, "leave_room")
+            await receive(guest, "left_room")
+            self.assertNotIn(joined["token"], self.server.rooms[info["room"]].members)
+
+    async def test_resume_with_online_duplicate_renames_without_stealing_session(self):
+        host, info = await self.host()
+        first = await self.socket()
+        await send(first, "join_room", room=info["room"], name="viewer", protocol=2)
+        original = await receive(first, "room_joined")
+        first.transport.abort()
+        await receive(host, "member_left")
+        second = await self.socket()
+        await send(second, "join_room", room=info["room"], name="viewer", protocol=2)
+        newcomer = await receive(second, "room_joined")
+        self.assertEqual(newcomer["name"], "viewer")
+        self.assertNotEqual(newcomer["token"], original["token"])
+        restored = await self.socket()
+        await send(restored, "resume_room", room=info["room"], token=original["token"], protocol=2)
+        resumed = await receive(restored, "room_joined")
+        self.assertEqual(resumed["name"], "viewer_1")
+        self.assertEqual(resumed["token"], original["token"])
+        self.assertEqual(resumed["members"], ["host", "viewer_1", "viewer"])
+        # A second resume starts from the requested nickname, not viewer_1_1.
+        restored.transport.abort()
+        await receive(second, "member_left")
+        await send(second, "leave_room")
+        await receive(second, "left_room")
+        again = await self.socket()
+        await send(again, "resume_room", room=info["room"], token=original["token"], protocol=2)
+        self.assertEqual((await receive(again, "room_joined"))["name"], "viewer")
+
+    async def test_literal_numeric_suffix_and_online_duplicates_are_preserved(self):
+        host, info = await self.host()
+        for expected in ("viewer_1", "viewer_1_1", "viewer_1_2"):
+            guest = await self.socket()
+            await send(guest, "join_room", room=info["room"], name="viewer_1", protocol=2)
+            self.assertEqual((await receive(guest, "room_joined"))["name"], expected)
+
     async def test_timeline_advances_and_pause_zero_survives_resume(self):
         host, info = await self.host()
         await send(host, "play", position=10, id="play")

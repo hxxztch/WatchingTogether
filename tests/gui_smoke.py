@@ -134,6 +134,13 @@ def main():
             assert guest._my_name == "guest"
             guest._on_leave_room()
             wait_for(lambda: not guest._room_ready and guest._network._session is None)
+            wait_for(lambda: not guest._network._leaving)
+            guest._on_join_room(host._room_code, "guest")
+            wait_for(lambda: guest._room_ready)
+            assert guest._my_name == "guest", "Leave/rejoin changed the nickname"
+            wait_for(lambda: host._room_panel._member_list.count() == 3)
+            assert [host._room_panel._member_list.item(i).text().strip()
+                    for i in range(3)].count("guest") == 1
             assert not exceptions, "Unexpected Qt callback exception"
             print("GUI smoke passed: create/join, typed-time room seek/play, disconnect/resume at paused zero, leave")
         finally:

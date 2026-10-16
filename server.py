@@ -61,6 +61,7 @@ class Peer:
 class Member:
     def __init__(self, name, peer):
         self.name = name
+        self.requested_name = name
         self.token = secrets.token_urlsafe(32)
         self.peer = peer
         self.expires = None
@@ -82,6 +83,16 @@ class Room:
     @property
     def member_names(self):
         return [member.name for member in self.members.values() if member.peer is not None]
+
+    def available_name(self, requested_name, exclude=None):
+        """Only online members reserve display names; tokens identify sessions."""
+        names = {member.name for member in self.members.values()
+                 if member.peer is not None and member is not exclude}
+        name, suffix = requested_name, 1
+        while name in names:
+            name = f"{requested_name}_{suffix}"
+            suffix += 1
+        return name
 
     def snapshot(self):
         now = time.monotonic()
@@ -199,6 +210,7 @@ class Server:
                             cursor = max(0, min(candidate.chat_seq, int(msg.get("chat_seq", 0))))
                             room, member = candidate, restored
                             old_peer = member.peer
+                            member.name = room.available_name(member.requested_name, exclude=member)
                             member.peer = peer
                             member.expires = None
                             if old_peer is not None and old_peer is not peer:
@@ -213,12 +225,8 @@ class Server:
                                 room = self.rooms.get(msg.get("room"))
                                 if room is None:
                                     raise ValueError("Room not found")
-                            base, suffix = name, 1
-                            names = {item.name for item in room.members.values()}
-                            while name in names:
-                                name = f"{base}_{suffix}"
-                                suffix += 1
                             member = Member(name, peer)
+                            member.name = room.available_name(member.requested_name)
                             room.members[member.token] = member
                             cursor = room.chat_seq
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
