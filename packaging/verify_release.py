@@ -11,12 +11,12 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.version import CLIENT_NAME, SERVER_NAME
+from app.version import CLIENT_NAME, SERVER_NAME, CLIENT_VERSION
 
 
 def main():
-    dist = ROOT / 'dist' / 'release-1.4.0'
-    reports = ROOT / 'build' / 'release-1.4.0'
+    dist = ROOT / 'dist' / ('release-' + CLIENT_VERSION)
+    reports = ROOT / 'build' / ('release-' + CLIENT_VERSION)
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith(
         ('PYTHON', 'CONDA', 'QT_', 'QML', 'VIRTUAL_ENV', '_PYI'))}
     system = Path(env.get('SystemRoot', r'C:\Windows'))

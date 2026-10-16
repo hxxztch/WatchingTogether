@@ -49,6 +49,7 @@ class NetworkClient(QThread):
         self._protocol = 1
         self.recovery_timeout = recovery_timeout
         self._disconnected_since = None
+        self._transport = None
 
     def run(self):
         self._loop = asyncio.new_event_loop()
@@ -64,8 +65,22 @@ class NetworkClient(QThread):
             log.exception("Network worker stopped unexpectedly")
             self.signals.error_occurred.emit("网络线程异常，请刷新连接")
         finally:
+            self._loop.run_until_complete(self._shutdown_pending())
             self._loop.run_until_complete(self._loop.shutdown_asyncgens())
             self._loop.close()
+
+    async def _shutdown_pending(self):
+        # TLS close / keepalive callbacks can outlive a cancelled connect context
+        # on Windows. Drain them before closing the Proactor event loop.
+        if self._transport is not None:
+            self._transport.abort()
+            self._transport = None
+        pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        await asyncio.sleep(0)
 
     async def _connect_loop(self):
         failures = 0
@@ -85,6 +100,7 @@ class NetworkClient(QThread):
                                    open_timeout=5, close_timeout=2, max_size=65536) as ws:
                     connected_at = time.monotonic()
                     self._ws = ws
+                    self._transport = ws.transport
                     self._generation += 1
                     self._send_queue = asyncio.Queue(maxsize=128)
                     self._protocol = 1
@@ -339,9 +355,10 @@ class NetworkClient(QThread):
             self._runner.cancel()
 
     def stop(self):
+        was_stopping = self._stopping.is_set()
         self._stopping.set()
         loop = self._loop
-        if loop is not None and not loop.is_closed():
+        if not was_stopping and loop is not None and not loop.is_closed():
             try:
                 loop.call_soon_threadsafe(self._cancel_runner)
             except RuntimeError:

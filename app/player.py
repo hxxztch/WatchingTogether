@@ -19,6 +19,7 @@ class MpvWidget(QWidget):
     playback_paused = Signal()
     playback_ended = Signal()
     media_load_failed = Signal()
+    subtitles_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,6 +32,7 @@ class MpvWidget(QWidget):
         self._loading = False
         self._loading_path = None
         self._volume = 80
+        self._subtitle_history = []
 
     def _ensure_player(self):
         if self._setup_done:
@@ -159,6 +161,8 @@ class MpvWidget(QWidget):
         except Exception:
             self._loading = False
             raise
+        self._subtitle_history.clear()
+        self.subtitles_changed.emit(False)
 
     def load_dash(self, video_url, audio_url, resume_play=True, seek_pos=None):
         """Load video, external audio, seek position and pause state as one operation."""
@@ -192,8 +196,33 @@ class MpvWidget(QWidget):
 
     def load_subtitle(self, path: str):
         """Load an external subtitle file."""
-        if self._player:
-            self._player.sub_add(path)
+        if not self._player or self.is_loading or self.duration <= 0:
+            raise ValueError('请先打开视频，再导入字幕。')
+        before = {track['id'] for track in self._player.track_list if track.get('type') == 'sub'}
+        previous = self._player.sid
+        self._player.sub_add(path, 'select')
+        for track in self._player.track_list:
+            if track.get('type') == 'sub' and track.get('external') and track['id'] not in before:
+                self._subtitle_history.append((track['id'], track.get('external-filename', ''), previous))
+        self.subtitles_changed.emit(bool(self._subtitle_history))
+
+    def undo_subtitle(self):
+        """Remove only tracks explicitly added by this app, never embedded ones."""
+        if not self._player or self.is_loading:
+            return False
+        tracks = self._player.track_list
+        while self._subtitle_history:
+            track_id, filename, previous = self._subtitle_history.pop()
+            if any(t.get('type') == 'sub' and t.get('external') and t['id'] == track_id and
+                   t.get('external-filename', '') == filename for t in tracks):
+                self._player.sub_remove(track_id)
+                if previous in ('no', False) or any(t.get('type') == 'sub' and t['id'] == previous and
+                                                    t['id'] != track_id for t in tracks):
+                    self._player.sid = previous
+                self.subtitles_changed.emit(bool(self._subtitle_history))
+                return True
+        self.subtitles_changed.emit(False)
+        return False
 
     def get_audio_tracks(self):
         """Return list of audio tracks: [(id, label), ...]"""
@@ -251,6 +280,8 @@ class MpvWidget(QWidget):
             parts.append('%.0f' % int(round(float(fps))) + 'fps')
         return ' '.join(parts)
     def stop(self):
+        self._subtitle_history.clear()
+        self.subtitles_changed.emit(False)
         self._loading = False
         if self._player:
             self._player.stop()

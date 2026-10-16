@@ -51,6 +51,10 @@ class ControlsBar(QWidget):
 
     bili_login_requested = Signal()
     bili_logout_requested = Signal()
+    bili_status_changed = Signal(bool, str)
+    media_title_changed = Signal()
+    subtitle_requested = Signal()
+    subtitle_undo_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -321,6 +325,7 @@ class ControlsBar(QWidget):
         self._media_title.setText(str(title) or '未命名视频')
         self._media_title.setToolTip(str(title))
         self._media_source.setText(source)
+        self.media_title_changed.emit()
 
     def set_position(self, pos: float, duration: float):
         self._duration = duration
@@ -340,6 +345,7 @@ class ControlsBar(QWidget):
         self._bili_logged_in = logged_in
         self._bili_uname = uname
         self._rebuild_more_menu()
+        self.bili_status_changed.emit(logged_in, uname)
 
     def _on_bili_menu(self):
         dlg = QDialog(self.parentWidget() or self.window())

@@ -27,6 +27,7 @@ class RoomController(QObject):
         self.pending = None
         self.name = ''
         self.endpoint = ''
+        self.loading = None
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._timeout)
@@ -53,6 +54,8 @@ class RoomController(QObject):
 
     def create(self, name):
         self.cancel()
+        if self.panel.mode.currentIndex() == 0:
+            self._show_loading()
         self.name = name
         self.integrated = True
         self.panel.set_busy(True)
@@ -126,6 +129,7 @@ class RoomController(QObject):
     def retry_tunnel(self):
         if not self.host or self.host.lan:
             return
+        self._show_loading()
         if self.tunnel:
             self.tunnel.stop()
             self.tunnel.deleteLater()
@@ -142,6 +146,7 @@ class RoomController(QObject):
     def _tunnel_ready(self, endpoint):
         if self.sender() is not self.tunnel or not self.host:
             return
+        self._finish_loading()
         self.endpoint = endpoint + self.host.guest_path
         self.panel.set_invitation(make_invitation(self.endpoint, self.room))
         self.panel.retry_tunnel.setEnabled(True)
@@ -150,6 +155,7 @@ class RoomController(QObject):
     def _tunnel_failed(self, text):
         if self.sender() is not self.tunnel:
             return
+        self._finish_loading()
         self.panel.set_invitation('')
         self.panel.retry_tunnel.setEnabled(True)
         self.panel.tunnel_status.setText(text)
@@ -165,6 +171,7 @@ class RoomController(QObject):
         self.panel.set_status('连接房间超时，请检查邀请链接和网络后重试。', '#b36b4a')
 
     def cancel(self):
+        self._finish_loading()
         self.timer.stop()
         self.pending = None
         if self.host:
@@ -189,3 +196,16 @@ class RoomController(QObject):
         if hasattr(self.owner, '_player'):
             self.owner._player.set_speed(1.0)
         self.panel.set_status('已离开房间')
+
+    def _show_loading(self):
+        if self.loading is None:
+            from app.ui.loading import RoomLoadingDialog
+            self.loading = RoomLoadingDialog(self.owner)
+            self.loading.cancelled.connect(self.cancel)
+            self.loading.show()
+
+    def _finish_loading(self):
+        if self.loading is not None:
+            dialog, self.loading = self.loading, None
+            dialog.finish()
+            dialog.deleteLater()

@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QSize, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QStackedWidget, QScrollArea, QSizePolicy,
+    QHBoxLayout, QGridLayout, QStackedWidget, QScrollArea, QSizePolicy, QProgressBar,
 )
 from app.version import CLIENT_VERSION, SERVER_VERSION
 
@@ -73,6 +73,10 @@ def line_icon(kind, color="#987a63"):
         painter.drawLine(10, 8, 15, 11)
         painter.drawLine(15, 11, 10, 14)
         painter.drawLine(10, 14, 10, 8)
+    elif kind == "profile":
+        painter.drawEllipse(3, 3, 18, 18)
+        painter.drawEllipse(9, 6, 6, 6)
+        painter.drawArc(6, 12, 12, 10, 0, 180 * 16)
     elif kind == "room":
         painter.drawEllipse(8, 3, 8, 8)
         painter.drawArc(4, 12, 16, 12, 0, 180 * 16)
@@ -130,7 +134,7 @@ class DesktopShell(QWidget):
         side.addLayout(brand_row)
         side.addSpacing(28)
         self.nav_buttons = []
-        for index, (text, icon) in enumerate((("首页", "home"), ("播放影厅", "cinema"), ("房间", "room"))):
+        for index, (text, icon) in enumerate((("首页", "home"), ("播放影厅", "cinema"), ("房间", "room"), ("个人中心", "profile"))):
             button = QToolButton()
             button.setObjectName("nav")
             button.setText(text)
@@ -181,6 +185,17 @@ class DesktopShell(QWidget):
         room_layout.addStretch()
         rooms.setWidget(room_page)
         self.pages.addWidget(rooms)
+        from app.ui.profile import ProfilePage
+        self.profile = ProfilePage(owner)
+        profile_scroll = QScrollArea()
+        profile_scroll.setWidgetResizable(True)
+        profile_page = QWidget()
+        profile_layout = QVBoxLayout(profile_page)
+        profile_layout.setContentsMargins(24, 24, 24, 24)
+        profile_layout.addWidget(self.profile, 0, Qt.AlignTop)
+        profile_layout.addStretch()
+        profile_scroll.setWidget(profile_page)
+        self.pages.addWidget(profile_scroll)
         root.addWidget(self.pages, 1)
         self._theatre_layout = theatre_layout
         self.set_page(0)
@@ -352,6 +367,16 @@ class MiniPlayer(QWidget):
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(0)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(5)
+        self.progress.setStyleSheet('QProgressBar { border: none; background: #e5dbd0; } QProgressBar::chunk { background: #b8754c; }')
+        self.body.addWidget(self.progress)
+        self.time_label = QLabel('00:00 / 00:00')
+        self.time_label.setAlignment(Qt.AlignRight)
+        self.time_label.setContentsMargins(8, 3, 8, 2)
+        self.body.addWidget(self.time_label)
         toolbar = QWidget()
         toolbar.setObjectName("miniToolbar")
         toolbar.setAttribute(Qt.WA_StyledBackground, True)
@@ -376,8 +401,22 @@ class MiniPlayer(QWidget):
 
     def refresh(self):
         if self.isVisible():
+            from app.timecode import format_timecode
+            self.refresh_title()
+            player = self.owner._player
+            self.progress.setValue(max(0, min(1000, int(player.position / player.duration * 1000))) if player.duration > 0 else 0)
+            self.time_label.setText(format_timecode(player.position) + ' / ' + format_timecode(player.duration))
             self.play.setText("暂停" if self.owner._player.is_playing else "播放")
             self.mute.setText("恢复声音" if self.owner._player.volume == 0 else "静音")
+
+    def refresh_title(self):
+        title = self.owner._controls._media_title.text()
+        self.setWindowTitle(self.fontMetrics().elidedText(title, Qt.ElideRight, max(80, self.width() - 180)))
+        self.setToolTip(title)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_title()
 
     def closeEvent(self, event):
         event.ignore()

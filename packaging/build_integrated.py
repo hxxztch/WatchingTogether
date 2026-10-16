@@ -4,9 +4,9 @@ import shutil
 from pathlib import Path
 import build_release as release
 
-release.DIST = release.ROOT / 'dist' / 'integrated-preview'
-release.WORK = release.ROOT / 'build' / 'integrated-preview'
-release.CLIENT_HELP = '''超时空会夜机 · 一体化预览（2026-10-17）
+release.DIST = release.ROOT / 'dist' / 'beta0.1.0'
+release.WORK = release.ROOT / 'build' / 'beta0.1.0'
+release.CLIENT_HELP = '''超时空会夜机 beta0.1.0（2026-10-17）
 Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 
 1. 完整解压后运行 EXE，保留 _internal 文件夹。
@@ -23,6 +23,11 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
    点击时间块输入时间回车跳转，左右键每次 5 秒并同步；点击喇叭静音 / 恢复。
 7. 邀请含房间密钥，只分享给想邀请的人；会话与邀请不写入配置。
    个人登录保存到 EXE 旁 config.json，重新分发时请移除 config.json 和 crash.log。
+8. 「个人中心」管理昵称和 Bilibili 登录；新昵称从下一次加入生效。
+   小窗标题显示影片名，底部显示播放进度；长标题按完整行省略，悬停查看全名。
+9. 影厅右侧「导入字幕」支持 SRT / ASS / SSA / SUB / VTT / TXT，亦可拖入。
+   「撤销字幕」移除最近手动导入的外挂字幕，不删除原文件、不影响内嵌字幕。
+10. 创建公共通道时显示转圈提示并锁定其他操作，可用提示框内「取消」中止。
 
 公共通道使用 Cloudflare Quick Tunnel，属于无可用性保证的临时服务。
 聊天和控制经第三方通道转发（传输加密，非端到端加密）；不传视频、不建立系统虚拟网卡。
@@ -35,7 +40,7 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['build', 'archive'])
-    parser.add_argument('--output', type=Path, default=release.ROOT / 'dist/integrated-archives')
+    parser.add_argument('--output', type=Path, default=release.ROOT / 'dist/beta-archives')
     args = parser.parse_args()
     if args.action == 'build':
         release.build(components=['client'])

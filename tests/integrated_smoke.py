@@ -5,6 +5,8 @@ import sys
 import tempfile
 import time
 import traceback
+import logging
+import gc
 
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +24,13 @@ def main():
     public = '--public' in sys.argv
     app = QApplication([])
     failures = []
+    class AsyncErrors(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.ERROR:
+                failures.append('asyncio: ' + record.getMessage())
+    logger = logging.getLogger('asyncio')
+    errors_handler = AsyncErrors()
+    logger.addHandler(errors_handler)
     def report(kind, value, tb):
         failures.append(kind.__name__)
         traceback.print_exception(kind, value, tb)
@@ -115,7 +124,9 @@ def main():
                 if window._player._player:
                     window._player._player.terminate()
             app.processEvents()
+            gc.collect()
     assert not failures
+    logger.removeHandler(errors_handler)
 
 
 if __name__ == '__main__':

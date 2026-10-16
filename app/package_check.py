@@ -76,6 +76,21 @@ def run(report_path, server_url=None):
                 controls._on_vol_toggle()
                 assert host._player.volume == 37
                 result['checks'].append('native Qt platform, mpv decoding, local forward-slash path, volume')
+                profile = host._shell.profile
+                profile.nickname.setText('portable-profile')
+                profile.save_name()
+                assert config.load()['nickname'] == host._room_panel.get_name() == 'portable-profile'
+                host._controls.set_media_title('Long title ' * 30)
+                title = host._controls._media_title
+                title.resize(240, title.height())
+                assert len(title.display_lines()) == 2 and title.display_lines()[-1].endswith('…')
+                subtitle = Path(folder) / 'manual.srt'
+                subtitle.write_text('1\n00:00:00,000 --> 00:00:15,000\nPortable subtitle\n', encoding='utf-8')
+                host._player.load_subtitle(str(subtitle))
+                assert host._controls._subtitle_undo.isEnabled()
+                assert host._player.undo_subtitle() and subtitle.is_file()
+                assert not host._controls._subtitle_undo.isEnabled()
+                result['checks'].append('profile persistence, whole-line title ellipsis, real external subtitle add/undo')
                 if not server_url:
                     host._room_panel.mode.setCurrentIndex(1)
                 host._on_create_room('package-host')

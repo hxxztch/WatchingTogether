@@ -4,10 +4,12 @@ import time
 import unittest
 import subprocess
 import sys
+import threading
 from PySide6.QtCore import QCoreApplication
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 from app.hosting import EmbeddedHost, make_invitation, parse_invitation
+from app.network import NetworkClient
 
 APP = QCoreApplication.instance() or QCoreApplication([])
 
@@ -107,6 +109,33 @@ class InvitationTests(unittest.TestCase):
                       'ws://host/room/key?room=１２３４'):
             with self.assertRaises(ValueError):
                 parse_invitation(value)
+
+
+class WorkerShutdownTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_drains_background_keepalive_before_loop_close(self):
+        started, cleaned = threading.Event(), threading.Event()
+        class Worker(NetworkClient):
+            async def _connect_loop(self):
+                async def keepalive():
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    finally:
+                        cleaned.set()
+                asyncio.create_task(keepalive())
+                await asyncio.Event().wait()
+        worker = Worker()
+        worker.start()
+        try:
+            deadline = time.monotonic() + 3
+            while not started.is_set():
+                self.assertLess(time.monotonic(), deadline)
+                await asyncio.sleep(.01)
+            self.assertTrue(await asyncio.get_running_loop().run_in_executor(None, worker.stop))
+            self.assertTrue(cleaned.is_set())
+            self.assertTrue(worker.stop())
+        finally:
+            worker.stop()
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'Windows process ownership')

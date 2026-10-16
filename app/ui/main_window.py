@@ -2,7 +2,7 @@
 import os as _os, sys, logging, subprocess, shutil, re, json, urllib.request
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
-    QApplication, QLabel, QPushButton, QScrollArea,
+    QApplication, QLabel, QPushButton, QScrollArea, QFileDialog,
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRect
 import base64
@@ -34,7 +34,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, legacy_autoconnect=False):
         super().__init__()
-        self.setWindowTitle(CLIENT_NAME + " · 一体化预览")
+        self.setWindowTitle(CLIENT_NAME)
         self.resize(1440, 900)
         self.setMinimumSize(1120, 720)
         self.setStyleSheet(WARM_STYLE)
@@ -81,6 +81,8 @@ class MainWindow(QMainWindow):
         self._restore_bili_login()
         self._controls.page_changed.connect(self._on_page_change)
         self._controls.fullscreen_toggled.connect(self._on_fullscreen)
+        self._controls.subtitle_requested.connect(self._choose_subtitle)
+        self._controls.subtitle_undo_requested.connect(self._undo_subtitle)
 
         self._network = NetworkClient(self._room_panel.get_server_url())
         self._network.signals.connected.connect(self._on_connected)
@@ -93,6 +95,8 @@ class MainWindow(QMainWindow):
             self._network.start()
 
         self._player = MpvWidget()
+        self._player.subtitles_changed.connect(self._controls._subtitle_undo.setEnabled)
+        self.setAcceptDrops(True)
         self._player.position_changed.connect(self._on_position)
         self._player.playback_started.connect(lambda: self._controls.set_playing(True))
         self._player.playback_paused.connect(lambda: self._controls.set_playing(False))
@@ -157,6 +161,7 @@ class MainWindow(QMainWindow):
         hlayout.addWidget(s)
         self._left_panel = left
         self._pip = MiniPlayer(self)
+        self._controls.media_title_changed.connect(self._pip.refresh_title)
         self._pip.return_requested.connect(lambda: self._switch_page(1))
         self._empty_stage = QWidget(right)
         self._empty_stage.setObjectName("emptyStage")
@@ -415,9 +420,14 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
 
     def _on_bili_logout(self):
-        self._invalidate_quality_request()
         from app.config import save as _cfg_save
-        _cfg_save(bili_cookie="", bili_uid="", bili_uname="")
+        if not _cfg_save(bili_cookie="", bili_uid="", bili_uname=""):
+            message = '退出登录未保存，请检查配置目录的写入权限后重试。'
+            self._room_panel.set_status(message, '#b36b4a')
+            if hasattr(self, '_shell'):
+                self._shell.profile.feedback.setText(message)
+            return
+        self._invalidate_quality_request()
         self._controls.set_bili_status(False)
 
     def _restore_bili_login(self):
@@ -802,7 +812,7 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.KeyPress:
             # Navigation on Home must not issue playback commands to the room.
             in_pip = hasattr(self, '_pip') and isinstance(obj, QWidget) and obj.window() is self._pip
-            if hasattr(self, '_shell') and self._shell.pages.currentIndex() == 0 and not in_pip:
+            if hasattr(self, '_shell') and self._shell.pages.currentIndex() != 1 and not in_pip:
                 return super().eventFilter(obj, event)
             # Don't steal keys from text input widgets
             from PySide6.QtWidgets import QLineEdit
@@ -937,6 +947,10 @@ class MainWindow(QMainWindow):
         self._controls.hide()
 
     def _check_fs_mouse(self):
+        if QApplication.activeModalWidget():
+            self._controls.hide()
+            self._controls._vol_popup.hide()
+            return
         if not hasattr(self, '_shell'):
             return
         if (self._shell.pages.currentIndex() != 1 or not self.isVisible() or
@@ -966,9 +980,33 @@ class MainWindow(QMainWindow):
         if urls:
             path = urls[0].toLocalFile()
             if path.lower().endswith((".srt", ".ass", ".ssa", ".sub", ".vtt", ".txt")):
-                self._player.load_subtitle(path)
-                self._room_panel.add_chat("系统", "字幕: " + path.split("/")[-1].split("\\")[-1])
-                self._danmaku.show_danmaku("字幕", "已加载")
+                self._import_subtitle(path)
+                event.acceptProposedAction()
+
+    def _choose_subtitle(self):
+        if self._player.duration <= 0 or self._player.is_loading:
+            self._room_panel.set_status('请先打开视频，再导入字幕。', '#95724f')
+            return
+        path, _ = QFileDialog.getOpenFileName(self, '导入外挂字幕', '',
+            '字幕文件 (*.srt *.ass *.ssa *.sub *.vtt *.txt)')
+        if path:
+            self._import_subtitle(path)
+
+    def _import_subtitle(self, path):
+        try:
+            self._player.load_subtitle(path)
+            self._room_panel.set_status('已导入字幕：' + _os.path.basename(path), '#95724f')
+            self._room_panel.add_chat('系统', '外挂字幕已在本机加载；右侧可撤销。')
+        except Exception:
+            self._room_panel.set_status('字幕未能加载，请确认视频已打开、字幕文件格式有效。', '#b36b4a')
+
+    def _undo_subtitle(self):
+        try:
+            removed = self._player.undo_subtitle()
+            self._room_panel.set_status('已撤销最近导入的外挂字幕，原文件保留。' if removed else
+                                        '没有可以撤销的手动外挂字幕。', '#95724f')
+        except Exception:
+            self._room_panel.set_status('字幕移除失败，请稍后重试。', '#b36b4a')
 
     def closeEvent(self, event):
         self._closing = True
