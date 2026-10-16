@@ -15,8 +15,8 @@ from app.version import CLIENT_NAME, SERVER_NAME
 
 
 def main():
-    dist = ROOT / 'dist' / 'release-1.4.0'
-    reports = ROOT / 'build' / 'release-1.4.0'
+    dist = ROOT / 'dist' / 'release-1.3.2'
+    reports = ROOT / 'build' / 'release-1.3.2'
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith(
         ('PYTHON', 'CONDA', 'QT_', 'QML', 'VIRTUAL_ENV', '_PYI'))}
     system = Path(env.get('SystemRoot', r'C:\Windows'))

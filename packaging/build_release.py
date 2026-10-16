@@ -12,12 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.version import CLIENT_NAME, SERVER_NAME
 
-DIST = ROOT / 'dist' / 'release-1.4.0'
-WORK = ROOT / 'build' / 'release-1.4.0'
+DIST = ROOT / 'dist' / 'release-1.3.2'
+WORK = ROOT / 'build' / 'release-1.3.2'
 
-CLIENT_HELP = '''超时空会夜机1.4.0 / Windows 10、11 64位便携版
+CLIENT_HELP = '''超时空会夜机1.3.2 / Windows 10、11 64位便携版
 
-1. 完整解压本文件夹到可写目录，再双击“超时空会夜机1.4.0.exe”。
+1. 完整解压本文件夹到可写目录，再双击“超时空会夜机1.3.2.exe”。
 2. 无需安装Python、Qt、mpv或其他依赖。请保留_internal文件夹，不能只复制EXE。
 3. 先由一人启动server-1.2.0，在客户端填写ws://服务端电脑的局域网IP:9877，点击刷新连接，创建或加入房间。
 4. 服务端在同一电脑时填ws://127.0.0.1:9877。跨网段可使用已有虚拟局域网IP，所有成员仍需各自打开同一视频。
@@ -99,7 +99,7 @@ def archive(output):
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
         hashes.append(digest + '  ' + target.name)
         print(str(target) + '  ' + str(target.stat().st_size) + ' bytes', flush=True)
-    (output / 'SHA256-1.4.0-1.2.0.txt').write_text('\n'.join(hashes) + '\n', encoding='utf-8')
+    (output / 'SHA256-1.3.2-1.2.0.txt').write_text('\n'.join(hashes) + '\n', encoding='utf-8')
 
 
 if __name__ == '__main__':

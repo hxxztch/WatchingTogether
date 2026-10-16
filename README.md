@@ -2,6 +2,8 @@
 
 > 基于 WebSocket 的异地同步观影桌面应用
 
+2026-10-17 版本重新划分：原标为 1.4.0 的稳定客户端现归为 **1.3.2**，服务端仍为 1.2.0。后续暖白界面、内置房间和个人中心等改动在 [beta0.1.0 分支](https://github.com/hxxztch/WatchingTogether/tree/beta/0.1.0)；稳定版仍保留独立服务端架构。历史归档文件保留原名，新包按新版本号生成。
+
 ![Python](https://img.shields.io/badge/Python-3.8-blue)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green)
 ![WebSocket](https://img.shields.io/badge/WebSocket-Async-orange)
@@ -74,11 +76,11 @@ ngrok 会提供一个公网地址（例如 `https://xxx.ngrok-free.dev`），将
 python client.py
 ```
 
-### 客户端1.4.0 / 服务端1.2.0便携包
+### 客户端1.3.2 / 服务端1.2.0便携包
 
 2026-10-15更新源码及构建文档，完整变更见[更新日志.txt](更新日志.txt)。本地便携包于2026-10-14构建；发行ZIP不纳入Git源码仓库，GitHub自动生成的源码ZIP不能直接作为便携程序运行。
 
-Windows 10/11 64位用户完整解压对应ZIP，双击“超时空会夜机1.4.0.exe”或“server-1.2.0.exe”即可，无需安装Python或其他依赖。请保留EXE旁的`_internal`文件夹；两端均使用新版本。个人配置在首次运行后自动生成，不随发行包提供。
+Windows 10/11 64位用户完整解压对应ZIP，双击“超时空会夜机1.3.2.exe”或“server-1.2.0.exe”即可，无需安装Python或其他依赖。请保留EXE旁的`_internal`文件夹；两端均使用新版本。个人配置在首次运行后自动生成，不随发行包提供。
 
 由一人运行服务端，其他客户端填写`ws://服务端局域网或虚拟局域网IP:9877`。同机使用`ws://127.0.0.1:9877`。互联网访问仍需要网络可达性，便携包不自带VPN或公网穿透服务。
 
@@ -96,7 +98,7 @@ python packaging/build_release.py archive --output dist/archives
 
 ### 联机稳定性与播放更新
 
-此前1.3.2本地改动已整合到客户端1.4.0和服务端1.2.0，客户端和服务端需要一起更新。已有的1.3.1 EXE和安装包不包含这些修改。
+稳定版1.3.2包含以下修复，客户端和服务端需要一起更新。已有的1.3.1 EXE和安装包不包含这些修改。
 
 两人处于同一局域网或可互访的虚拟局域网时，由一人运行 `python server.py`。其他人在客户端填写 `ws://服务端的虚拟局域网IP:9877`，刷新连接后创建或加入房间；服务端电脑需允许 TCP 9877 入站。
 
