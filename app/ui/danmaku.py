@@ -13,7 +13,7 @@ class DanmakuOverlay(QWidget):
         self.setWindowFlags(
             
             Qt.FramelessWindowHint |
-            Qt.Tool | Qt.WindowDoesNotAcceptFocus
+            Qt.Tool | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
@@ -35,7 +35,7 @@ class DanmakuOverlay(QWidget):
         self._sync_position()
 
     def _sync_position(self):
-        if self._target and self._target.isVisible():
+        if self._target and self._target.isVisible() and not self._target.window().isMinimized():
             pos = self._target.mapToGlobal(self._target.rect().topLeft())
             self.setGeometry(pos.x(), pos.y(),
                              self._target.width(), self._target.height())

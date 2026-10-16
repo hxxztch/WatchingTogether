@@ -73,6 +73,7 @@ def main():
         try:
             for _ in range(3):
                 window = MainWindow()
+                window._switch_page(1)
                 windows.append(window)
                 player = mpv.MPV(vo="null", ao="null", keep_open="yes", pause=True)
                 players.append(player)

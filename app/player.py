@@ -25,7 +25,7 @@ class MpvWidget(QWidget):
         self.setAttribute(Qt.WA_DontCreateNativeAncestors, True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAttribute(Qt.WA_NativeWindow, True)
-        self.setStyleSheet("background-color: black;")
+        self.setStyleSheet("background-color: #f0f1f2;")
         self._player = None
         self._setup_done = False
         self._loading = False

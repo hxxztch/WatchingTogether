@@ -62,6 +62,7 @@ def run(report_path, server_url):
             try:
                 for _ in range(2):
                     window = MainWindow()
+                    window._switch_page(1)
                     windows.append(window)
                     window._on_load_file(media.as_posix())
                 wait_for(lambda: all(not w._player.is_loading and w._player.duration > 0 and

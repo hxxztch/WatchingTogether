@@ -17,18 +17,18 @@ _BILI_LOGO = _os.path.join(_B, "assets", "bilibililogo.png")
 
 MENU_STYLE = """
 QMenu {
-    background-color: #2a2a2a; color: #e0e0e0;
-    border: 1px solid #555; padding: 4px 0;
+    background-color: #fffaf4; color: #58493c;
+    border: 1px solid #d9c8b7; padding: 4px 0;
     font-size: 12px;
 }
 QMenu::item {
     padding: 5px 24px;
 }
 QMenu::item:selected {
-    background-color: #444;
+    background-color: #ede1d4;
 }
 QMenu::separator {
-    height: 1px; background: #444; margin: 3px 8px;
+    height: 1px; background: #ede1d4; margin: 3px 8px;
 }
 """
 
@@ -71,9 +71,15 @@ class ControlsBar(QWidget):
     #  layout
     # ================================================================
     def _setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(4)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(9)
+        timeline = QHBoxLayout()
+        timeline.setSpacing(14)
+        layout = QHBoxLayout()
+        layout.setSpacing(6)
+        root.addLayout(timeline)
+        root.addLayout(layout)
 
         # -- open video --
         open_btn = QPushButton("\u6253\u5F00\u89C6\u9891")
@@ -98,9 +104,9 @@ class ControlsBar(QWidget):
         stop_btn = QPushButton("■")
         stop_btn.setFixedSize(30, 30)
         stop_btn.setStyleSheet(
-            "QPushButton { background-color: #c0392b; color: white; border: none; "
+            "QPushButton { background-color: rgba(255, 255, 255, 205); color: #656a70; border: 1px solid rgba(210, 205, 200, 170); "
             "border-radius: 3px; font-size: 14px; padding: 0; }"
-            "QPushButton:hover { background-color: #e74c3c; }"
+            "QPushButton:hover { background-color: rgba(255, 255, 255, 240); }"
         )
         stop_btn.clicked.connect(lambda: self.stop_requested.emit())
         layout.addWidget(stop_btn)
@@ -123,7 +129,7 @@ class ControlsBar(QWidget):
         self._time_stack.setFixedWidth(115)
         self._time_stack.addWidget(self._time_label)
         self._time_stack.addWidget(self._time_editor)
-        layout.addWidget(self._time_stack)
+        timeline.addWidget(self._time_stack)
 
         # -- seek --
         self._seek_bar = QSlider(Qt.Horizontal)
@@ -132,27 +138,28 @@ class ControlsBar(QWidget):
         self._seek_bar.sliderPressed.connect(self._on_seek_press)
         self._seek_bar.sliderReleased.connect(self._on_seek_release)
         self._seek_bar.installEventFilter(self)
-        layout.addWidget(self._seek_bar, stretch=1)
+        timeline.addWidget(self._seek_bar, stretch=1)
 
         # -- danmaku input --
         self._danmaku_input = QLineEdit()
         self._danmaku_input.setMaxLength(4000)
-        self._danmaku_input.setFixedWidth(120)
-        self._danmaku_input.setStyleSheet("background-color: #2a2a2a; color: #e0e0e0; border: 1px solid #555; border-radius: 3px; padding: 2px 6px; font-size: 11px;")
+        self._danmaku_input.setMinimumWidth(70)
+        self._danmaku_input.setMaximumWidth(150)
+        self._danmaku_input.setStyleSheet("background-color: rgba(255, 255, 255, 210); color: #58493c; border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; padding: 4px 6px; font-size: 11px;")
         self._danmaku_input.setPlaceholderText("发个弹幕...")
         self._danmaku_input.returnPressed.connect(self._on_danmaku)
-        layout.addWidget(self._danmaku_input)
+        timeline.addWidget(self._danmaku_input)
         self._danmaku_btn = QPushButton("发送")
         self._danmaku_btn.setFixedSize(36, 24)
-        self._danmaku_btn.setStyleSheet("QPushButton { background-color: #444; color: #fff; border: 1px solid #555; border-radius: 3px; font-size: 11px; padding: 0; } QPushButton:hover { background-color: #555; }")
+        self._danmaku_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 205); color: #675548; border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; font-size: 11px; padding: 0; } QPushButton:hover { background-color: rgba(255, 255, 255, 240); }")
         self._danmaku_btn.clicked.connect(self._on_danmaku)
-        layout.addWidget(self._danmaku_btn)
+        timeline.addWidget(self._danmaku_btn)
 
         # -- volume --
         vol_frame = QFrame()
         vol_frame.setFixedSize(32, 32)
         vol_frame.setStyleSheet(
-            "QFrame { background-color: #2a2a2a; border: 1px solid #555; border-radius: 3px; }"
+            "QFrame { background-color: rgba(255, 255, 255, 205); border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; }"
         )
         vol_layout = QVBoxLayout(vol_frame)
         vol_layout.setContentsMargins(0, 0, 0, 0)
@@ -177,7 +184,7 @@ class ControlsBar(QWidget):
         self._vol_popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
         self._vol_popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self._vol_popup.setStyleSheet(
-            "QFrame { background-color: #2a2a2a; border: 1px solid #555; border-radius: 3px; }"
+            "QFrame { background-color: #fffaf4; border: 1px solid #d9c8b7; border-radius: 3px; }"
         )
         self._vol_popup.setFixedSize(32, 100)
         self._vol_popup.installEventFilter(self)
@@ -194,29 +201,31 @@ class ControlsBar(QWidget):
         self._vol_hide_timer.timeout.connect(self._vol_hide_check)
 
         layout.addWidget(vol_frame)
+        layout.addStretch()
 
         # -- quality --
         self._quality_label = QLabel("\u753B\u8D28:")
-        self._quality_label.setStyleSheet("font-size: 11px; color: #aaa; padding: 0 2px; min-width: 80px;")
+        self._quality_label.setStyleSheet("background: rgba(255, 255, 255, 210); border-radius: 5px; font-size: 11px; color: #675d54; padding: 5px 8px; min-width: 80px;")
+        self._quality_label.setMaximumWidth(150)
         layout.addWidget(self._quality_label)
 
         self._quality_combo = QComboBox()
         self._quality_combo.setFixedWidth(68)
         self._quality_combo.setStyleSheet("""
             QComboBox {
-                background-color: #2a2a2a; color: #e0e0e0;
-                border: 1px solid #555; border-radius: 3px;
+                background-color: #fffaf4; color: #58493c;
+                border: 1px solid #d9c8b7; border-radius: 3px;
                 padding: 2px 4px; font-size: 11px;
             }
-            QComboBox:hover { border-color: #888; }
+            QComboBox:hover { border-color: #927b66; }
             QComboBox QAbstractItemView {
-                background-color: #2a2a2a; color: #e0e0e0;
-                selection-background-color: #444; outline: none;
+                background-color: #fffaf4; color: #58493c;
+                selection-background-color: #ede1d4; outline: none;
             }
         """)
         self._quality_combo.currentTextChanged.connect(self._on_quality_change)
         self._quality_combo.hide()
-        layout.addWidget(self._quality_combo)
+        timeline.addWidget(self._quality_combo)
 
         # -- more --
         self._more_btn = QPushButton("\u5176\u4ED6\u529F\u80FD")
@@ -232,9 +241,9 @@ class ControlsBar(QWidget):
         fs_btn = QPushButton("\u26F6")
         fs_btn.setFixedSize(28, 28)
         fs_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: 1px solid #555; "
+            "QPushButton { background: rgba(255, 255, 255, 205); border: 1px solid rgba(210, 205, 200, 170); "
             "border-radius: 3px; font-size: 13px; padding: 1px; }"
-            "QPushButton:hover { background-color: #555; }"
+            "QPushButton:hover { background-color: #d9c8b7; }"
         )
         fs_btn.clicked.connect(lambda: self.fullscreen_toggled.emit())
         layout.addWidget(fs_btn)
@@ -335,12 +344,12 @@ class ControlsBar(QWidget):
             self.file_selected.emit(path)
 
     def _on_url_dialog(self):
-        dlg = QDialog(self.window())
+        dlg = QDialog(self.parentWidget() or self.window())
         dlg.setWindowTitle("URL\u6253\u5F00\u89C6\u9891")
-        dlg.setFixedSize(420, 120)
+        dlg.setMinimumSize(480, 210)
         dlg.setStyleSheet(
-            "QDialog { background-color: #1e1e1e; color: #e0e0e0; }"
-            "QLabel { color: #d0d0d0; }"
+            "QDialog { background-color: #f8f5f1; color: #58493c; }"
+            "QLabel { color: #675548; }"
         )
         lay = QVBoxLayout(dlg)
         lay.setSpacing(8)
@@ -348,12 +357,12 @@ class ControlsBar(QWidget):
         url_input = QLineEdit()
         url_input.setPlaceholderText("https://...")
         url_input.setStyleSheet(
-            "QLineEdit { background-color: #2a2a2a; color: #e0e0e0; "
-            "border: 1px solid #555; border-radius: 3px; padding: 6px 8px; }"
+            "QLineEdit { background-color: #fffaf4; color: #58493c; "
+            "border: 1px solid #d9c8b7; border-radius: 3px; padding: 6px 8px; }"
         )
         lay.addWidget(url_input)
         login_hint = QLabel("在其他功能中登录bilibili账号以获取更高的B站视频清晰度")
-        login_hint.setStyleSheet("color: #888; font-size: 11px;")
+        login_hint.setStyleSheet("color: #927b66; font-size: 11px;")
         lay.addWidget(login_hint)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.setStyleSheet(
@@ -505,10 +514,10 @@ class ControlsBar(QWidget):
         self._rebuild_more_menu()
 
     def _on_bili_menu(self):
-        dlg = QDialog(self)
+        dlg = QDialog(self.parentWidget() or self.window())
         dlg.setWindowTitle("bilibili登录")
         dlg.setFixedSize(300, 250)
-        dlg.setStyleSheet("QDialog { background-color: #1a1a1a; }")
+        dlg.setStyleSheet("QDialog { background-color: #f8f5f1; }")
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(12)
@@ -523,7 +532,7 @@ class ControlsBar(QWidget):
         status_text = "已登录: " + self._bili_uname if self._bili_logged_in else "未登录"
         status_label = QLabel(status_text)
         status_label.setAlignment(Qt.AlignCenter)
-        status_label.setStyleSheet("color: #aaa; font-size: 12px;")
+        status_label.setStyleSheet("color: #927b66; font-size: 12px;")
         lay.addWidget(status_label)
         lay.addStretch()
         # Buttons
@@ -538,7 +547,7 @@ class ControlsBar(QWidget):
             login_btn.clicked.connect(lambda: (self.bili_login_requested.emit(), dlg.accept()))
             lay.addWidget(login_btn)
         close_btn = QPushButton("关闭")
-        close_btn.setStyleSheet("QPushButton { background-color: #444; color: #ccc; border-radius: 3px; padding: 6px 16px; font-size: 12px; } QPushButton:hover { background-color: #555; }")
+        close_btn.setStyleSheet("QPushButton { background-color: #ede1d4; color: #675548; border-radius: 3px; padding: 6px 16px; font-size: 12px; } QPushButton:hover { background-color: #d9c8b7; }")
         close_btn.clicked.connect(dlg.reject)
         lay.addWidget(close_btn)
         dlg.exec()

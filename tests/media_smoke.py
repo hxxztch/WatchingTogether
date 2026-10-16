@@ -56,6 +56,7 @@ def main():
         config.save(server='ws://127.0.0.1:1', bili_cookie=cookie)
         with patch.object(mpv.MPV, '__init__', null_init):
             window = MainWindow()
+            window._switch_page(1)
             window._network.stop()
             try:
                 window._controls._vol_slider_v.setValue(64)

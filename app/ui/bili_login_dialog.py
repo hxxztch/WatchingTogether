@@ -11,7 +11,7 @@ class BiliLoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('bilibili登录')
         self.setFixedSize(360, 450)
-        self.setStyleSheet('QDialog {background:#1a1a1a;} QLabel {color:#ddd;}')
+        self.setStyleSheet('QDialog {background:#f8f5f1;} QLabel {color:#58493c;}')
         self._session_factory = session_factory
         self._session = None
         self._active = True

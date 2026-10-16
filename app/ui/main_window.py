@@ -2,7 +2,7 @@
 import os as _os, sys, logging, subprocess, shutil, re, json, urllib.request
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
-    QApplication,
+    QApplication, QLabel, QPushButton,
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer
 import base64
@@ -17,6 +17,7 @@ from app.ui.room_panel import RoomPanel
 from app.ui.controls import ControlsBar
 from app.ui.danmaku import DanmakuOverlay
 from app.version import CLIENT_NAME
+from app.ui.shell import DesktopShell, MiniPlayer, WARM_STYLE, label
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,53 +26,6 @@ if getattr(sys, 'frozen', False):
 else:
     _ASSETS = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "assets")
 
-STYLE = """
-QMainWindow { background-color: #1a1a1a; }
-QWidget { color: #e0e0e0; }
-QLabel { color: #d0d0d0; }
-QLineEdit {
-    background-color: #2a2a2a; color: #e0e0e0;
-    border: 1px solid #555; border-radius: 3px; padding: 4px 8px;
-}
-QPushButton {
-    background-color: #444; color: #fff; border: none;
-    border-radius: 3px; padding: 6px 12px; font-size: 12px;
-}
-QPushButton:hover { background-color: #555; }
-QPushButton#create_btn { background-color: #2196F3; }
-QPushButton#create_btn:hover { background-color: #1976D2; }
-QPushButton#join_btn { background-color: #4CAF50; }
-QPushButton#join_btn:hover { background-color: #388E3C; }
-QPushButton#leave_btn { background-color: #f44336; }
-QPushButton#leave_btn:hover { background-color: #D32F2F; }
-QPushButton#play_btn { background-color: #2196F3; font-size: 16px; padding: 4px; }
-QPushButton#play_btn:hover { background-color: #1976D2; }
-QLabel#panel_title { font-size: 18px; font-weight: bold; color: #fff; }
-QLabel#room_label { font-size: 15px; font-weight: bold; color: #FFD54F; }
-QLabel#status_label { color: #999; font-size: 11px; }
-QLabel#time_label { color: #aaa; font-size: 11px; min-width: 100px; }
-QListWidget {
-    background-color: #2a2a2a; color: #d0d0d0;
-    border: 1px solid #444; border-radius: 3px;
-}
-QSlider::groove:horizontal {
-    background: #444; height: 4px; border-radius: 2px;
-}
-QSlider::handle:horizontal {
-    background: #2196F3; width: 12px; height: 12px;
-    margin: -4px 0; border-radius: 6px;
-}
-QMessageBox {
-    background-color: #2d2d2d; color: #e0e0e0;
-}
-QMessageBox QLabel {
-    color: #e0e0e0; font-size: 13px;
-}
-QMessageBox QPushButton {
-    background-color: #555; color: #fff;
-    padding: 6px 20px; border-radius: 3px; min-width: 70px;
-}
-"""
 
 
 class MainWindow(QMainWindow):
@@ -80,10 +34,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(CLIENT_NAME)
-        self.resize(1280, 800)
-        self.setMinimumSize(960, 600)
-        self.setStyleSheet(STYLE)
+        self.setWindowTitle(CLIENT_NAME + " · 界面预览")
+        self.resize(1440, 900)
+        self.setMinimumSize(1120, 720)
+        self.setStyleSheet(WARM_STYLE)
         _pix = QPixmap()
         _pix.loadFromData(base64.b64decode("""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"""))
         if not _pix.isNull():
@@ -148,7 +102,7 @@ class MainWindow(QMainWindow):
         hlayout.setSpacing(0)
 
         left = QWidget()
-        left.setStyleSheet("background-color: #1e1e1e; border-right: 1px solid #333;")
+        left.setObjectName("roomCard")
         l2 = QVBoxLayout(left)
         l2.setContentsMargins(0, 0, 0, 0)
         l2.addWidget(self._room_panel)
@@ -158,21 +112,59 @@ class MainWindow(QMainWindow):
         r2.setContentsMargins(0, 0, 0, 0)
         r2.setSpacing(0)
         r2.addWidget(self._player, stretch=1)
-        # Controls float over the player instead of pushing it up
-        self._controls.setParent(right)
+        self._video_layout = r2
+        # A translucent owned tool window composites over mpv's native HWND.
+        # A regular sibling QWidget would blend against Qt's backing store,
+        # hiding the video behind a solid rectangle on Windows.
+        self._controls.setParent(self, Qt.Tool | Qt.FramelessWindowHint)
+        self._controls.setAttribute(Qt.WA_TranslucentBackground, True)
+        self._controls.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self._controls.setObjectName("controlsBar")
+        self._controls.setAttribute(Qt.WA_StyledBackground, True)
+        self._controls.setStyleSheet(WARM_STYLE + "\n#controlsBar { background: transparent; border: none; }")
         self._player_container = right
 
         s = QSplitter(Qt.Horizontal)
-        s.addWidget(left)
         s.addWidget(right)
-        s.setStretchFactor(0, 0)
-        s.setStretchFactor(1, 1)
-        s.setSizes([260, 1020])
+        s.addWidget(left)
+        s.setChildrenCollapsible(False)
+        s.setStretchFactor(0, 1)
+        s.setStretchFactor(1, 0)
+        s.setSizes([1000, 280])
         self._splitter = s
         hlayout.addWidget(s)
-        self.setCentralWidget(center)
-
         self._left_panel = left
+        self._pip = MiniPlayer(self)
+        self._pip.return_requested.connect(lambda: self._switch_page(1))
+        self._empty_stage = QWidget(right)
+        self._empty_stage.setObjectName("emptyStage")
+        self._empty_stage.setAttribute(Qt.WA_StyledBackground, True)
+        self._empty_stage.setStyleSheet("#emptyStage { background: #f0f1f2; border-top-left-radius: 14px; border-top-right-radius: 14px; }")
+        empty_layout = QVBoxLayout(self._empty_stage)
+        empty_layout.setContentsMargins(28, 28, 28, 28)
+        empty_layout.addStretch()
+        mark = QLabel()
+        mark.setPixmap(self.windowIcon().pixmap(64, 64))
+        empty_layout.addWidget(mark, alignment=Qt.AlignCenter)
+        empty_layout.addSpacing(16)
+        empty_layout.addWidget(label("银幕就绪，等你开场", "heading"), alignment=Qt.AlignCenter)
+        empty_layout.addWidget(label("打开一部影片，再邀请朋友一起看。", "subtle"), alignment=Qt.AlignCenter)
+        empty_layout.addSpacing(16)
+        open_row = QHBoxLayout()
+        open_row.addStretch()
+        self._empty_open = QPushButton("打开本地视频")
+        self._empty_open.setObjectName("primary")
+        self._empty_open.clicked.connect(self._controls._on_open_file)
+        self._empty_url = QPushButton("粘贴视频链接")
+        self._empty_url.clicked.connect(self._controls._on_url_dialog)
+        open_row.addWidget(self._empty_open)
+        open_row.addWidget(self._empty_url)
+        open_row.addStretch()
+        empty_layout.addLayout(open_row)
+        empty_layout.addStretch()
+        self._shell = DesktopShell(self, center)
+        self._shell.page_requested.connect(self._switch_page)
+        self.setCentralWidget(self._shell)
 
         from PySide6.QtCore import QTimer as _QTimer
         self._vid_info_timer = _QTimer(self)
@@ -423,6 +415,7 @@ class MainWindow(QMainWindow):
             self._network.send({"type": "seek", "position": pos})
 
     def _on_load_file(self, path):
+        self._empty_stage.hide()
         self._invalidate_quality_request()
         self._bili_info = None
         self._controls.set_video_quality("", None)
@@ -741,14 +734,20 @@ class MainWindow(QMainWindow):
             self._exit_fullscreen()
 
     def eventFilter(self, obj, event):
+        if obj is self and event.type() in (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.WindowStateChange):
+            QTimer.singleShot(0, self._position_controls)
         if event.type() == QEvent.KeyPress:
+            # Navigation on Home must not issue playback commands to the room.
+            in_pip = hasattr(self, '_pip') and isinstance(obj, QWidget) and obj.window() is self._pip
+            if hasattr(self, '_shell') and self._shell.pages.currentIndex() == 0 and not in_pip:
+                return super().eventFilter(obj, event)
             # Don't steal keys from text input widgets
             from PySide6.QtWidgets import QLineEdit
             if isinstance(obj, QLineEdit) or isinstance(QApplication.focusWidget(), QLineEdit):
                 return super().eventFilter(obj, event)
             # A global filter must not process another window's keys or steal
             # navigation from an open dialog/menu.
-            if isinstance(obj, QWidget) and obj.window() is not self:
+            if isinstance(obj, QWidget) and obj.window() not in (self, self._controls) and not in_pip:
                 return super().eventFilter(obj, event)
             if QApplication.activeModalWidget() or QApplication.activePopupWidget():
                 return super().eventFilter(obj, event)
@@ -766,6 +765,7 @@ class MainWindow(QMainWindow):
                 return True
         if obj is self._player and event.type() == QEvent.Resize:
             self._danmaku.track(self._player)
+            self._position_controls()
         if hasattr(self, '_player_container') and obj is self._player_container and event.type() == QEvent.Resize:
             self._position_controls()
         return super().eventFilter(obj, event)
@@ -777,12 +777,15 @@ class MainWindow(QMainWindow):
             self._enter_fullscreen()
 
     def _enter_fullscreen(self):
+        self._switch_page(1)
+        self._was_maximized = self.isMaximized()
+        self._shell.fullscreen(True)
         self._left_panel.hide()
         self._controls.hide()
         self._fs_timer.stop()
         # Save splitter sizes and give all space to player
         self._saved_sizes = self._splitter.sizes()
-        self._splitter.setSizes([0, self._splitter.width()])
+        self._splitter.setSizes([self._splitter.width(), 0])
         self.showFullScreen()
         self._position_controls()
         # Force mpv to fill the entire window (fixes black bar at top on Windows)
@@ -790,10 +793,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, lambda: self._player.update())
 
     def _exit_fullscreen(self):
+        self._shell.fullscreen(False)
         self._left_panel.show()
         self._controls.show()
         self._fs_timer.stop()
-        self.showNormal()
+        self.showMaximized() if getattr(self, '_was_maximized', False) else self.showNormal()
         self._position_controls()
         # Restore splitter sizes
         if hasattr(self, '_saved_sizes'):
@@ -802,13 +806,50 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, lambda: self._player.update())
 
     def _position_controls(self):
-        """Position controls bar at the bottom of its parent, floating over video."""
-        if self._controls.parent():
-            pw = self._controls.parent().width()
-            ph = self._controls.parent().height()
-            ch = self._controls.sizeHint().height()
-            self._controls.setGeometry(0, ph - ch, pw, ch)
+        """Follow the native video surface with a genuinely transparent overlay."""
+        if hasattr(self, '_empty_stage'):
+            self._empty_stage.setGeometry(self._player.geometry())
+        if not hasattr(self, '_shell'):
+            return
+        if self._shell.pages.currentIndex() != 1 or not self.isVisible() or self.isMinimized():
+            self._controls.hide()
+            self._controls._vol_popup.hide()
+            return
+        origin = self._player.mapToGlobal(self._player.rect().topLeft())
+        ch = self._controls.sizeHint().height()
+        self._controls.setGeometry(origin.x(), origin.y() + self._player.height() - ch,
+                                   self._player.width(), ch)
+        if not self.isFullScreen():
+            self._controls.show()
             self._controls.raise_()
+
+    def _switch_page(self, index):
+        if index == 0 and self.isFullScreen():
+            self._exit_fullscreen()
+        if index == 0 and self._player.is_playing and self._player.duration > 0:
+            if not self._pip.isVisible():
+                self._video_layout.removeWidget(self._player)
+                self._pip.body.insertWidget(0, self._player, 1)
+                self._player.show()
+                self._controls._vol_popup.hide()
+                screen = self.screen().availableGeometry()
+                self._pip.move(screen.right() - self._pip.width() - 24,
+                               screen.bottom() - self._pip.height() - 24)
+                self._pip.show()
+        elif index == 1 and self._player.parentWidget() is self._pip:
+            self._pip.body.removeWidget(self._player)
+            self._video_layout.insertWidget(0, self._player, 1)
+            self._pip.hide()
+            self._player.show()
+        self._shell.set_page(index)
+        if index == 0:
+            self._controls.hide()
+            self._controls._vol_popup.hide()
+        self._shell.refresh_status()
+        QTimer.singleShot(0, self._position_controls)
+        self._danmaku.track(self._player)
+        if index == 1:
+            self._player.setFocus()
 
     def _hide_fs_controls(self):
         if self._controls.is_editing_time:
@@ -846,6 +887,12 @@ class MainWindow(QMainWindow):
                 self._danmaku.show_danmaku("字幕", "已加载")
 
     def closeEvent(self, event):
+        self._shell.timer.stop()
+        self._pip.timer.stop()
+        self._pip.hide()
+        self._controls._vol_popup.hide()
+        self._controls.hide()
+        self._controls._vol_hide_timer.stop()
         self._invalidate_quality_request()
         self._fs_timer.stop()
         self._fs_mouse_timer.stop()

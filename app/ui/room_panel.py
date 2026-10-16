@@ -27,18 +27,19 @@ class RoomPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(260)
+        self.setFixedWidth(280)
         self._setup_ui()
         self._in_room = False
         self._load_config()
+        self._last_applied_server = self.get_server_url()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 20, 18, 18)
+        layout.setSpacing(12)
 
-        title = QLabel("超时空会夜机")
-        title.setAlignment(Qt.AlignCenter)
+        title = QLabel("房间与聊天")
+        title.setAlignment(Qt.AlignLeft)
         title.setObjectName("panel_title")
         layout.addWidget(title)
 
@@ -68,16 +69,10 @@ class RoomPanel(QWidget):
         no_room = QWidget()
         nr_layout = QVBoxLayout(no_room)
         nr_layout.setSpacing(8)
-        # Decorative image above nickname label
-        if _os.path.exists(_IMG_PATH):
-            img_label = QLabel()
-            pixmap = QPixmap(_IMG_PATH)
-            scaled = pixmap.scaledToWidth(236, Qt.SmoothTransformation)
-            img_label.setPixmap(scaled)
-            img_label.setAlignment(Qt.AlignCenter)
-            nr_layout.addWidget(img_label)
-        else:
-            nr_layout.addStretch()
+        nr_layout.setContentsMargins(0, 12, 0, 0)
+        intro = QLabel("为今晚的相聚，\n留一个位置。")
+        intro.setStyleSheet("font-size: 19px; color: #a57552; padding: 14px 0;")
+        nr_layout.addWidget(intro)
 
         nr_layout.addWidget(QLabel("你的昵称:"))
 
@@ -106,6 +101,7 @@ class RoomPanel(QWidget):
 
         in_room = QWidget()
         ir_layout = QVBoxLayout(in_room)
+        ir_layout.setContentsMargins(0, 12, 0, 0)
         ir_layout.setSpacing(8)
         self._room_label = QLabel()
         self._room_label.setObjectName("room_label")
@@ -149,10 +145,14 @@ class RoomPanel(QWidget):
         layout.addWidget(self._status)
 
     def _on_refresh_clicked(self):
+        self._last_applied_server = self.get_server_url()
         self.refresh_connection.emit(self.get_server_url())
 
     def _on_server_edited(self):
-        self.refresh_connection.emit(self.get_server_url())
+        # Moving focus between the translucent controls and the main window
+        # must not reconnect (and leave the room) for an unchanged address.
+        if self.get_server_url() != self._last_applied_server:
+            self._on_refresh_clicked()
 
     def update_server_label(self, url: str):
         self._current_server.setText(f"当前服务器: {url}")
