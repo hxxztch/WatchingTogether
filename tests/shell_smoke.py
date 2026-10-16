@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton
 from websockets.asyncio.server import serve
@@ -56,6 +57,11 @@ def main():
         QTest.qWait(150)
         origin = widget.mapToGlobal(QPoint(0, 0))
         widget.screen().grabWindow(0, origin.x(), origin.y(), widget.width(), widget.height()).save(str(output / filename))
+    def hover_controls(window):
+        QCursor.setPos(window._player.mapToGlobal(QPoint(window._player.width() // 2, window._player.height() - 24)))
+        wait(lambda: window._controls.isVisible())
+    def leave_controls(window):
+        QCursor.setPos(window._shell.sidebar.mapToGlobal(QPoint(20, 200)))
     windows = []
     with tempfile.TemporaryDirectory(prefix='film-shell-') as temporary:
         config.CONFIG_PATH = str(Path(temporary) / 'config.json')
@@ -81,12 +87,46 @@ def main():
             QTest.mouseClick(host._shell.enter_button, Qt.LeftButton)
             wait(lambda: host._player.isVisible())
             QTest.qWait(200)
+            leave_controls(host)
+            wait(lambda: not host._controls.isVisible())
+            hover_controls(host)
+            assert host._controls.height() <= 64, 'Controls must fit on one row'
+            for button in (host._controls._play_btn, host._controls._stop_btn, host._controls._vol_btn):
+                assert not button.icon().isNull() and button.text() == ''
+            leave_controls(host)
+            QTest.qWait(650)
+            assert host._controls.isVisible(), 'Controls disappeared before the delay'
+            wait(lambda: not host._controls.isVisible())
+            hover_controls(host)
+            QTest.mouseClick(host._controls._time_label, Qt.LeftButton)
+            leave_controls(host)
+            QTest.qWait(2100)
+            assert host._controls.isVisible(), 'Time editing was interrupted'
+            QTest.keyClick(host._controls._time_editor, Qt.Key_Escape)
+            wait(lambda: not host._controls.isVisible())
+            hover_controls(host)
+            host._controls._seek_bar.setSliderDown(True)
+            leave_controls(host)
+            QTest.qWait(2100)
+            assert host._controls.isVisible(), 'Seek dragging was interrupted'
+            host._controls._seek_bar.setSliderDown(False)
+            wait(lambda: not host._controls.isVisible())
+            hover_controls(host)
+            host._controls._show_vol_popup()
+            QCursor.setPos(host._controls._vol_popup.mapToGlobal(host._controls._vol_popup.rect().center()))
+            QTest.qWait(2100)
+            assert host._controls.isVisible() and host._controls._vol_popup.isVisible()
+            host._controls._vol_popup.hide()
+            leave_controls(host)
+            wait(lambda: not host._controls.isVisible())
+            hover_controls(host)
             capture(host, 'theatre-empty.png')
             host.resize(1120, 720)
             QTest.qWait(200)
             host._controls.set_video_quality('4K', {'120': '4K', '80': '1080P'})
             host._controls.set_position(3601, 7200)
             QTest.qWait(100)
+            hover_controls(host)
             for button in host._controls.findChildren(QPushButton):
                 if button.isVisible():
                     assert host._controls.rect().contains(button.geometry()), button.text() + ' clipped'
@@ -103,10 +143,14 @@ def main():
             assert not host._controls.isVisible() and not host._danmaku.isVisible()
             host.showNormal()
             QTest.qWait(150)
+            hover_controls(host)
             assert host._controls.isVisible()
             host.resize(1280, 800)
             host._on_load_file(media.as_posix())
             wait(lambda: not host._player.is_loading and host._player.duration > 0)
+            assert host._controls._media_title.text() == 'preview.y4m'
+            assert host._controls._media_source.text() == '本地视频'
+            assert not host._controls.isAncestorOf(host._controls._open_btn)
             host._controls._vol_slider_v.setValue(37)
             host._on_seek(4)
             guest = MainWindow()
@@ -120,6 +164,7 @@ def main():
             guest._on_join_room(host._room_code, 'guest')
             wait(lambda: guest._room_ready and guest._player.duration > 0)
             host._on_seek(4)
+            hover_controls(host)
             QTest.mouseClick(host._controls._time_label, Qt.LeftButton)
             host._controls._time_editor.setText('00:04')
             QTest.keyClick(host._controls._time_editor, Qt.Key_Return)
@@ -131,12 +176,18 @@ def main():
             assert host._network._session['token'] == session_before_focus
             host._on_toggle_play()
             wait(lambda: host._player.is_playing and guest._player.is_playing)
+            hover_controls(host)
+            host._shell.refresh_status()
+            host._poll_video_info()
             capture(host, 'theatre-playing.png')
             # A transparent gap in the toolbar must show the decoded video,
             # rather than Qt's opaque parent background.
             point = host._controls.mapToGlobal(QPoint(host._controls.width() // 2, host._controls.height() - 2))
             color = host.screen().grabWindow(0, point.x(), point.y(), 1, 1).toImage().pixelColor(0, 0)
             assert 195 <= color.red() <= 225 and abs(color.red() - color.blue()) < 5, color.name()
+            leave_controls(host)
+            wait(lambda: not host._controls.isVisible())
+            capture(host, 'theatre-hidden.png')
             player_object = host._player._player
             native_id = host._player.winId()
             token = host._network._session['token']
@@ -182,6 +233,10 @@ def main():
             host._enter_fullscreen()
             QTest.qWait(150)
             assert host.isFullScreen() and not host._shell.sidebar.isVisible()
+            hover_controls(host)
+            leave_controls(host)
+            QCursor.setPos(host._player.mapToGlobal(QPoint(50, 50)))
+            wait(lambda: not host._controls.isVisible())
             host._exit_fullscreen()
             QTest.qWait(150)
             assert host.isMaximized() and host._shell.sidebar.isVisible()
@@ -202,7 +257,7 @@ def main():
             assert host._pip.isVisible()
             host.close()
             assert not host._pip.isVisible()
-            print('PASS: native home/sidebar/theatre/minimum layout, same-mpv PiP, synchronized pause/+5s, volume restore, full screen, repeated return and close')
+            print('PASS: single-row vector controls, hover/delayed hide, edit/drag/volume protection, side media info, native PiP/sync/fullscreen/minimize')
         finally:
             for window in windows:
                 window.close()

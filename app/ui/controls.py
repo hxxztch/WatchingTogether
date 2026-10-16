@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QStyle, QStyleOptionSlider
 from PySide6.QtGui import QPixmap, QCursor
 import os as _os, sys as _sys
 from app.timecode import parse_timecode, format_timecode
+from app.ui.media_controls import media_icon
 
 if getattr(_sys, "frozen", False):
     _B = _sys._MEIPASS
@@ -71,182 +72,8 @@ class ControlsBar(QWidget):
     #  layout
     # ================================================================
     def _setup_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 10, 12, 10)
-        root.setSpacing(9)
-        timeline = QHBoxLayout()
-        timeline.setSpacing(14)
-        layout = QHBoxLayout()
-        layout.setSpacing(6)
-        root.addLayout(timeline)
-        root.addLayout(layout)
-
-        # -- open video --
-        open_btn = QPushButton("\u6253\u5F00\u89C6\u9891")
-        open_btn.setFixedSize(72, 26)
-        open_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 2px 4px; }")
-        open_menu = QMenu(self)
-        open_menu.setStyleSheet(MENU_STYLE)
-        open_menu.addAction("\u6253\u5F00\u672C\u5730\u89C6\u9891...", self._on_open_file)
-        open_menu.addAction("URL\u6253\u5F00\u89C6\u9891...", self._on_url_dialog)
-        open_btn.setMenu(open_menu)
-        layout.addWidget(open_btn)
-
-        # -- play --
-        self._play_btn = QPushButton("\u25B6")
-        self._play_btn.setFixedSize(30, 30)
-        self._play_btn.setObjectName("play_btn")
-        self._play_btn.setStyleSheet("font-size: 14px;")
-        self._play_btn.clicked.connect(self._on_toggle_play)
-        layout.addWidget(self._play_btn)
-
-        # -- stop --
-        stop_btn = QPushButton("■")
-        stop_btn.setFixedSize(30, 30)
-        stop_btn.setStyleSheet(
-            "QPushButton { background-color: rgba(255, 255, 255, 205); color: #656a70; border: 1px solid rgba(210, 205, 200, 170); "
-            "border-radius: 3px; font-size: 14px; padding: 0; }"
-            "QPushButton:hover { background-color: rgba(255, 255, 255, 240); }"
-        )
-        stop_btn.clicked.connect(lambda: self.stop_requested.emit())
-        layout.addWidget(stop_btn)
-
-        # -- time --
-        self._time_label = QLabel("00:00 / 00:00")
-        self._time_label.setObjectName("time_label")
-        self._time_label.setAlignment(Qt.AlignCenter)
-        self._time_label.setCursor(Qt.PointingHandCursor)
-        self._time_label.setToolTip("点击输入时间跳转（秒数、分:秒、时:分:秒）")
-        self._time_label.installEventFilter(self)
-        self._time_editor = QLineEdit()
-        self._time_editor.setAlignment(Qt.AlignCenter)
-        self._time_editor.setMaxLength(12)
-        self._time_editor.setAccessibleName("跳转到时间")
-        self._time_editor.setToolTip("回车跳转，Esc取消")
-        self._time_editor.returnPressed.connect(self._submit_time)
-        self._time_editor.installEventFilter(self)
-        self._time_stack = QStackedWidget()
-        self._time_stack.setFixedWidth(115)
-        self._time_stack.addWidget(self._time_label)
-        self._time_stack.addWidget(self._time_editor)
-        timeline.addWidget(self._time_stack)
-
-        # -- seek --
-        self._seek_bar = QSlider(Qt.Horizontal)
-        self._seek_bar.setRange(0, 1000)
-        self._seek_bar.setValue(0)
-        self._seek_bar.sliderPressed.connect(self._on_seek_press)
-        self._seek_bar.sliderReleased.connect(self._on_seek_release)
-        self._seek_bar.installEventFilter(self)
-        timeline.addWidget(self._seek_bar, stretch=1)
-
-        # -- danmaku input --
-        self._danmaku_input = QLineEdit()
-        self._danmaku_input.setMaxLength(4000)
-        self._danmaku_input.setMinimumWidth(70)
-        self._danmaku_input.setMaximumWidth(150)
-        self._danmaku_input.setStyleSheet("background-color: rgba(255, 255, 255, 210); color: #58493c; border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; padding: 4px 6px; font-size: 11px;")
-        self._danmaku_input.setPlaceholderText("发个弹幕...")
-        self._danmaku_input.returnPressed.connect(self._on_danmaku)
-        timeline.addWidget(self._danmaku_input)
-        self._danmaku_btn = QPushButton("发送")
-        self._danmaku_btn.setFixedSize(36, 24)
-        self._danmaku_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 205); color: #675548; border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; font-size: 11px; padding: 0; } QPushButton:hover { background-color: rgba(255, 255, 255, 240); }")
-        self._danmaku_btn.clicked.connect(self._on_danmaku)
-        timeline.addWidget(self._danmaku_btn)
-
-        # -- volume --
-        vol_frame = QFrame()
-        vol_frame.setFixedSize(32, 32)
-        vol_frame.setStyleSheet(
-            "QFrame { background-color: rgba(255, 255, 255, 205); border: 1px solid rgba(210, 205, 200, 170); border-radius: 5px; }"
-        )
-        vol_layout = QVBoxLayout(vol_frame)
-        vol_layout.setContentsMargins(0, 0, 0, 0)
-        vol_layout.setSpacing(0)
-
-        self._vol_btn = QPushButton("\U0001F50A")
-        self._vol_btn.setFixedSize(30, 30)
-        f = self._vol_btn.font()
-        f.setFamily("Segoe UI Emoji")
-        f.setPointSize(12)
-        self._vol_btn.setFont(f)
-        self._vol_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; padding: 0; }"
-        )
-        self._vol_btn.setToolTip("\u97F3\u91CF: 80")
-        self._vol_btn.clicked.connect(self._on_vol_toggle)
-        self._vol_btn.installEventFilter(self)
-        vol_layout.addWidget(self._vol_btn, alignment=Qt.AlignCenter)
-
-        # Volume popup
-        self._vol_popup = QFrame(self.window())
-        self._vol_popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
-        self._vol_popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self._vol_popup.setStyleSheet(
-            "QFrame { background-color: #fffaf4; border: 1px solid #d9c8b7; border-radius: 3px; }"
-        )
-        self._vol_popup.setFixedSize(32, 100)
-        self._vol_popup.installEventFilter(self)
-        vlay = QVBoxLayout(self._vol_popup)
-        vlay.setContentsMargins(4, 4, 4, 4)
-
-        self._vol_slider_v = QSlider(Qt.Vertical)
-        self._vol_slider_v.setRange(0, 100)
-        self._vol_slider_v.setValue(80)
-        self._vol_slider_v.valueChanged.connect(self._on_volume)
-        vlay.addWidget(self._vol_slider_v)
-
-        self._vol_hide_timer = QTimer(self)
-        self._vol_hide_timer.timeout.connect(self._vol_hide_check)
-
-        layout.addWidget(vol_frame)
-        layout.addStretch()
-
-        # -- quality --
-        self._quality_label = QLabel("\u753B\u8D28:")
-        self._quality_label.setStyleSheet("background: rgba(255, 255, 255, 210); border-radius: 5px; font-size: 11px; color: #675d54; padding: 5px 8px; min-width: 80px;")
-        self._quality_label.setMaximumWidth(150)
-        layout.addWidget(self._quality_label)
-
-        self._quality_combo = QComboBox()
-        self._quality_combo.setFixedWidth(68)
-        self._quality_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #fffaf4; color: #58493c;
-                border: 1px solid #d9c8b7; border-radius: 3px;
-                padding: 2px 4px; font-size: 11px;
-            }
-            QComboBox:hover { border-color: #927b66; }
-            QComboBox QAbstractItemView {
-                background-color: #fffaf4; color: #58493c;
-                selection-background-color: #ede1d4; outline: none;
-            }
-        """)
-        self._quality_combo.currentTextChanged.connect(self._on_quality_change)
-        self._quality_combo.hide()
-        timeline.addWidget(self._quality_combo)
-
-        # -- more --
-        self._more_btn = QPushButton("\u5176\u4ED6\u529F\u80FD")
-        self._more_btn.setFixedSize(72, 26)
-        self._more_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 2px 4px; }")
-        self._more_menu = QMenu(self)
-        self._more_menu.setStyleSheet(MENU_STYLE)
-        self._more_btn.setMenu(self._more_menu)
-        layout.addWidget(self._more_btn)
-        self._rebuild_more_menu()
-
-        # -- fullscreen --
-        fs_btn = QPushButton("\u26F6")
-        fs_btn.setFixedSize(28, 28)
-        fs_btn.setStyleSheet(
-            "QPushButton { background: rgba(255, 255, 255, 205); border: 1px solid rgba(210, 205, 200, 170); "
-            "border-radius: 3px; font-size: 13px; padding: 1px; }"
-            "QPushButton:hover { background-color: #d9c8b7; }"
-        )
-        fs_btn.clicked.connect(lambda: self.fullscreen_toggled.emit())
-        layout.addWidget(fs_btn)
+        from app.ui.media_controls import build_controls
+        build_controls(self, MENU_STYLE)
 
     # ================================================================
     #  event filter (volume popup)
@@ -403,13 +230,13 @@ class ControlsBar(QWidget):
         if vol > 0:
             self._vol_before_mute = vol
         if vol == 0:
-            self._vol_btn.setText("\U0001F507")
+            self._vol_btn.setIcon(media_icon('muted'))
             self._muted = True
         elif vol < 40:
-            self._vol_btn.setText("\U0001F508")
+            self._vol_btn.setIcon(media_icon('volume-low'))
             self._muted = False
         else:
-            self._vol_btn.setText("\U0001F50A")
+            self._vol_btn.setIcon(media_icon('volume'))
             self._muted = False
         self._vol_btn.setToolTip("点击恢复音量: {}".format(self._vol_before_mute) if vol == 0
                                 else "音量: {}，点击静音".format(vol))
@@ -454,7 +281,7 @@ class ControlsBar(QWidget):
         self._rebuild_more_menu()
 
     def set_video_quality(self, label="", qualities=None):
-        self._quality_label.setText("\u753B\u8D28: " + (label if label else ""))
+        self._quality_label.setText("\u753B\u8D28: " + (label if label else "—"))
         self._quality_combo.blockSignals(True)
         self._quality_combo.clear()
         if qualities:
@@ -492,7 +319,14 @@ class ControlsBar(QWidget):
     #  state updates
     # ================================================================
     def set_playing(self, playing: bool):
-        self._play_btn.setText("\u23F8" if playing else "\u25B6")
+        self._play_btn.setIcon(media_icon('pause' if playing else 'play'))
+        self._play_btn.setToolTip('暂停' if playing else '播放')
+        self._play_btn.setAccessibleName(self._play_btn.toolTip())
+
+    def set_media_title(self, title, source='当前影片'):
+        self._media_title.setText(str(title) or '未命名视频')
+        self._media_title.setToolTip(str(title))
+        self._media_source.setText(source)
 
     def set_position(self, pos: float, duration: float):
         self._duration = duration
@@ -502,7 +336,7 @@ class ControlsBar(QWidget):
             self._seek_bar.setValue(int(pos / duration * 1000))
             self._seek_bar.blockSignals(False)
         self._time_label.setText(format_timecode(pos) + " / " + format_timecode(duration))
-        self._time_stack.setFixedWidth(155 if max(pos, duration) >= 3600 else 115)
+        self._time_stack.setFixedWidth(175 if max(pos, duration) >= 3600 else 125)
 
 
     # ================================================================

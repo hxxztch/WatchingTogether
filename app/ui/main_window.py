@@ -2,9 +2,9 @@
 import os as _os, sys, logging, subprocess, shutil, re, json, urllib.request
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
-    QApplication, QLabel, QPushButton,
+    QApplication, QLabel, QPushButton, QScrollArea,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRect
 import base64
 import threading
 from PySide6.QtGui import QIcon, QPixmap
@@ -105,7 +105,21 @@ class MainWindow(QMainWindow):
         left.setObjectName("roomCard")
         l2 = QVBoxLayout(left)
         l2.setContentsMargins(0, 0, 0, 0)
-        l2.addWidget(self._room_panel)
+        self._right_scroll = QScrollArea()
+        self._right_scroll.setWidgetResizable(True)
+        self._right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._right_scroll.setStyleSheet('QScrollArea { border: none; background: transparent; }')
+        side_content = QWidget()
+        side_content.setObjectName('sideContent')
+        side_content.setStyleSheet('#sideContent { background: #fff; }')
+        side_layout = QVBoxLayout(side_content)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(0)
+        side_layout.addWidget(self._controls.media_panel)
+        side_layout.addWidget(self._room_panel, 1)
+        self._right_scroll.setWidget(side_content)
+        l2.addWidget(self._right_scroll)
+        left.setFixedWidth(300)
 
         right = QWidget()
         r2 = QVBoxLayout(right)
@@ -175,7 +189,8 @@ class MainWindow(QMainWindow):
         self._fs_timer.timeout.connect(self._hide_fs_controls)
         self._fs_mouse_timer = _QTimer()
         self._fs_mouse_timer.timeout.connect(self._check_fs_mouse)
-        self._fs_mouse_timer.start(200)
+        self._fs_mouse_timer.start(100)
+        self._controls_hide_delay = 1800
 
         app = QApplication.instance()
         if app:
@@ -215,6 +230,7 @@ class MainWindow(QMainWindow):
         self._controls.set_position(0, 0)
         self._controls.set_playing(False)
         self._player.stop()
+        self._controls.set_media_title('尚未打开视频')
 
     def _on_audio_select(self, track_id):
         self._player.set_audio_track(track_id)
@@ -415,6 +431,7 @@ class MainWindow(QMainWindow):
             self._network.send({"type": "seek", "position": pos})
 
     def _on_load_file(self, path):
+        self._controls.set_media_title(_os.path.basename(path.replace('\\', '/')), '本地视频')
         self._empty_stage.hide()
         self._invalidate_quality_request()
         self._bili_info = None
@@ -465,6 +482,7 @@ class MainWindow(QMainWindow):
             current_desc = quality_map.get(str(actual_qn), str(actual_qn) + "P")
 
             self._bili_info = {
+                "title": data.get("title", bvid),
                 "bvid": bvid,
                 "avid": avid,
                 "cid": cid,
@@ -475,6 +493,7 @@ class MainWindow(QMainWindow):
             }
 
             return {
+                "title": data.get("title", bvid),
                 "video_url": video_url,
                 "audio_url": audio_url,
                 "quality_map": quality_map,
@@ -500,12 +519,14 @@ class MainWindow(QMainWindow):
                     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 flags = 0x08000000 if _os.name == 'nt' else 0  # CREATE_NO_WINDOW
                 r = subprocess.run(
-                    [ytdlp, '-f', 'best[ext=mp4]/best', '-g', '--no-warnings', '--no-check-certificate', url],
+                    [ytdlp, '-f', 'best[ext=mp4]/best', '--dump-single-json', '--no-playlist', '--no-warnings', url],
                     capture_output=True, text=True, timeout=60,
                     startupinfo=si, creationflags=flags
                 )
                 if r.returncode == 0 and r.stdout.strip():
-                    return r.stdout.strip().split(chr(10))[0]
+                    info = json.loads(r.stdout)
+                    self._resolved_title = info.get('title') or ''
+                    return info.get('url') or (info.get('requested_formats') or [{}])[0].get('url')
             except Exception as e:
                 pass
         # Try Python module (fallback)
@@ -514,6 +535,7 @@ class MainWindow(QMainWindow):
             with YoutubeDL({'quiet': True, 'no_warnings': True, 'format': 'best'}) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if info:
+                    self._resolved_title = info.get('title') or ''
                     u = info.get('url') or (info.get('requested_formats') or [{}])[0].get('url')
                     return u
         except:
@@ -522,11 +544,17 @@ class MainWindow(QMainWindow):
 
     def _on_load_url(self, url):
         """Load from URL.  B站 videos use unified DASH-first path."""
+        from urllib.parse import urlsplit, unquote
+        parsed = urlsplit(url)
+        fallback_title = unquote(parsed.path.rstrip('/').split('/')[-1]) or parsed.hostname or '网页视频'
+        self._resolved_title = ''
+        self._controls.set_media_title(fallback_title, '网页视频')
         self._invalidate_quality_request()
         self._bili_info = None
         self._controls.set_audio_tracks([], -1)
         bili = self._resolve_bilibili(url)
         if bili:
+            self._controls.set_media_title(bili.get('title') or fallback_title, 'bilibili')
             audio_url = bili.get("audio_url", "")
             current_desc = bili.get("current_desc", "")
             self._room_panel.set_status("B站解析成功: " + current_desc, "#4CAF50")
@@ -546,6 +574,7 @@ class MainWindow(QMainWindow):
         else:
             resolved = self._resolve_ytdlp(url)
             if resolved:
+                self._controls.set_media_title(self._resolved_title or fallback_title, '网页视频')
                 self._room_panel.set_status("解析成功", "#4CAF50")
                 url = resolved
             self._player.load(url, resume_play=True)
@@ -699,6 +728,7 @@ class MainWindow(QMainWindow):
                 self._player.replace_flv(video_url, 0, True)
 
             bi["cid"] = new_cid
+            self._controls.set_media_title((bi.get('title') or bi['bvid']) + ' · ' + page_title, 'bilibili')
             bi["current_qn"] = actual_qn
             if quality_map:
                 bi["quality_map"] = quality_map
@@ -795,7 +825,6 @@ class MainWindow(QMainWindow):
     def _exit_fullscreen(self):
         self._shell.fullscreen(False)
         self._left_panel.show()
-        self._controls.show()
         self._fs_timer.stop()
         self.showMaximized() if getattr(self, '_was_maximized', False) else self.showNormal()
         self._position_controls()
@@ -819,9 +848,27 @@ class MainWindow(QMainWindow):
         ch = self._controls.sizeHint().height()
         self._controls.setGeometry(origin.x(), origin.y() + self._player.height() - ch,
                                    self._player.width(), ch)
-        if not self.isFullScreen():
-            self._controls.show()
-            self._controls.raise_()
+
+    def _controls_hovered(self):
+        from PySide6.QtGui import QCursor
+        if not self._player.isVisible():
+            return False
+        origin = self._player.mapToGlobal(self._player.rect().topLeft())
+        zone = QRect(origin.x(), origin.y() + max(0, self._player.height() - 76),
+                     self._player.width(), min(76, self._player.height()))
+        if not zone.contains(QCursor.pos()):
+            return False
+        under_pointer = QApplication.widgetAt(QCursor.pos())
+        if under_pointer is not None:
+            return under_pointer.window() in (self, self._controls, self._danmaku)
+        # Native mpv HWNDs / input-transparent overlays aren't always mapped by
+        # widgetAt on Windows. Only use this fallback while our window is active.
+        return QApplication.activeWindow() in (self, self._controls)
+
+    def _controls_interacting(self):
+        return (self._controls.is_editing_time or self._controls._dragging_seek or
+                self._controls._seek_bar.isSliderDown() or self._controls._vol_slider_v.isSliderDown() or
+                self._controls._vol_popup.isVisible())
 
     def _switch_page(self, index):
         if index == 0 and self.isFullScreen():
@@ -852,23 +899,27 @@ class MainWindow(QMainWindow):
             self._player.setFocus()
 
     def _hide_fs_controls(self):
-        if self._controls.is_editing_time:
-            self._fs_timer.start(3000)
+        if self._controls_interacting() or self._controls_hovered():
             return
-        if self.isFullScreen():
-            self._controls.hide()
+        self._controls.hide()
 
     def _check_fs_mouse(self):
-        if not self.isFullScreen():
+        if not hasattr(self, '_shell'):
             return
-        from PySide6.QtGui import QCursor
-        pos = QCursor.pos()
-        geo = self.geometry()
-        rel_y = pos.y() - geo.y()
-        if rel_y > geo.height() - 60:
-            self._controls.show(); self._controls.raise_()
+        if (self._shell.pages.currentIndex() != 1 or not self.isVisible() or
+                self.isMinimized() or self._pip.isVisible()):
+            self._fs_timer.stop()
+            self._controls.hide()
+            self._controls._vol_popup.hide()
+            return
+        if self._controls_hovered() or self._controls_interacting():
             self._position_controls()
-            self._fs_timer.start(3000)
+            if not self._controls.isVisible():
+                self._controls.show()
+                self._controls.raise_()
+            self._fs_timer.stop()
+        elif self._controls.isVisible() and not self._fs_timer.isActive():
+            self._fs_timer.start(self._controls_hide_delay)
 
     def dragEnterEvent(self, event):
         urls = event.mimeData().urls()

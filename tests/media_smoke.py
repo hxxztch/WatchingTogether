@@ -159,6 +159,42 @@ def main():
                 print('PASS: click/edit/Enter, invalid input, Escape, paused zero, per-file load options', flush=True)
                 print('PASS: load failure recovery, stale quality result ignored, unavailable quality preserves old stream', flush=True)
 
+                # The sidebar uses metadata from the existing resolve request;
+                # signed URL query strings must never become the visible title.
+                from types import SimpleNamespace
+                bili_metadata = {'code': 0, 'data': {'aid': 1, 'cid': 2,
+                    'title': '网页标题 <不是HTML>', 'pages': [
+                        {'page': 1, 'cid': 2, 'part': '第一集'},
+                        {'page': 2, 'cid': 3, 'part': '第二集'}]}}
+                with patch('app.ui.main_window.urllib.request.urlopen') as api, \
+                     patch.object(window, '_fetch_bilibili_streams', return_value=('video', 'audio', 80, {'80': '1080P'})), \
+                     patch.object(window._player, 'load_dash'), patch.object(window._player, 'play'):
+                    api.return_value.read.return_value = json.dumps(bili_metadata).encode('utf-8')
+                    window._on_load_url('https://www.bilibili.com/video/BV1mfay6pEti/')
+                    assert controls._media_title.text() == '网页标题 <不是HTML>'
+                    assert controls._media_title.textFormat() == Qt.PlainText
+                    window._on_page_change(2)
+                    assert controls._media_title.text().endswith(' · 第二集')
+                fake_info = {'title': '一般网页视频', 'url': 'https://cdn.example.test/video.mp4?secret=hidden'}
+                with patch('app.ui.main_window.shutil.which', return_value='yt-dlp'), \
+                     patch('app.ui.main_window.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=json.dumps(fake_info))), \
+                     patch.object(window._player, 'load') as load, patch.object(window._player, 'play'):
+                    window._on_load_url('https://example.test/watch?v=1')
+                    assert controls._media_title.text() == '一般网页视频'
+                    load.assert_called_once_with(fake_info['url'], resume_play=True)
+                with patch('app.ui.main_window.shutil.which', return_value=None), patch('yt_dlp.YoutubeDL') as extractor:
+                    extractor.return_value.__enter__.return_value.extract_info.return_value = fake_info
+                    assert window._resolve_ytdlp('https://example.test/watch?v=1') == fake_info['url']
+                    assert window._resolved_title == '一般网页视频'
+                with patch.object(window._player, 'load'), patch.object(window._player, 'play'), \
+                     patch.object(window, '_resolve_ytdlp', return_value=None):
+                    window._on_load_url('https://example.test/My%20Video.mp4?secret=hidden')
+                    assert controls._media_title.text() == 'My Video.mp4'
+                    assert 'hidden' not in controls._media_title.toolTip()
+                window._on_stop()
+                assert controls._media_title.text() == '尚未打开视频'
+                print('PASS: local/Bilibili/episode/general-web titles, plain text, direct URL fallback, stop clears title', flush=True)
+
                 if live:
                     anonymous = window._bili_api.fetch_streams(117369577936130, 42383181508, 120)
                     assert anonymous[2] in (16, 32) and '120' not in anonymous[3]

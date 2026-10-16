@@ -35,32 +35,41 @@ class RoomPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 20, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(8)
 
         title = QLabel("房间与聊天")
         title.setAlignment(Qt.AlignLeft)
         title.setObjectName("panel_title")
         layout.addWidget(title)
 
-                
+        self._connection_toggle = QPushButton('连接设置  ▾')
+        self._connection_toggle.setCheckable(True)
+        self._connection_toggle.setChecked(True)
+        self._connection_body = QWidget()
+        connection = QVBoxLayout(self._connection_body)
+        connection.setContentsMargins(0, 0, 0, 0)
+        connection.setSpacing(8)
+        self._connection_toggle.toggled.connect(self._connection_body.setVisible)
+        layout.addWidget(self._connection_toggle)
+        layout.addWidget(self._connection_body)
         server_label = QLabel("服务器:")
-        layout.addWidget(server_label)
+        connection.addWidget(server_label)
         self._server_input = QLineEdit()
         self._server_input.setPlaceholderText("ws://localhost:9877")
-        layout.addWidget(self._server_input)
+        connection.addWidget(self._server_input)
         self._server_input.textChanged.connect(self._on_server_changed)
         self._server_input.editingFinished.connect(self._on_server_edited)
 
         self._current_server = QLabel("当前服务器: -")
         self._current_server.setObjectName("current_server_label")
         self._current_server.setWordWrap(True)
-        layout.addWidget(self._current_server)
+        connection.addWidget(self._current_server)
 
         refresh_btn = QPushButton("刷新连接")
         refresh_btn.clicked.connect(self._on_refresh_clicked)
         refresh_btn.setObjectName("refresh_btn")
-        layout.addWidget(refresh_btn)
+        connection.addWidget(refresh_btn)
 
         layout.addSpacing(4)
 
@@ -70,9 +79,6 @@ class RoomPanel(QWidget):
         nr_layout = QVBoxLayout(no_room)
         nr_layout.setSpacing(8)
         nr_layout.setContentsMargins(0, 12, 0, 0)
-        intro = QLabel("为今晚的相聚，\n留一个位置。")
-        intro.setStyleSheet("font-size: 19px; color: #a57552; padding: 14px 0;")
-        nr_layout.addWidget(intro)
 
         nr_layout.addWidget(QLabel("你的昵称:"))
 
@@ -111,7 +117,7 @@ class RoomPanel(QWidget):
         self._member_list.setWordWrap(True)
         self._member_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._member_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._member_list.setMaximumHeight(120)
+        self._member_list.setMaximumHeight(80)
         ir_layout.addWidget(self._member_list)
         leave_btn = QPushButton("离开房间")
         leave_btn.clicked.connect(self._on_leave)
@@ -226,6 +232,8 @@ class RoomPanel(QWidget):
             self._chat_input.clear()
 
     def set_in_room(self, in_room: bool, room_code: str = "", members: list = None):
+        if in_room and not self._in_room:
+            self._connection_toggle.setChecked(False)
         self._in_room = in_room
         if in_room:
             self._stack.setCurrentIndex(1)
