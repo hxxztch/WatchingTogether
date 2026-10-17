@@ -109,7 +109,7 @@ class RoomController(QObject):
                     self.panel.lan_address.setVisible(True)
                     self.update_lan_invitation()
                 else:
-                    self.retry_tunnel()
+                    self._start_tunnel()
         elif kind in ('room_closed', 'session_expired'):
             if self.integrated:
                 self.cancel()
@@ -129,16 +129,11 @@ class RoomController(QObject):
             else:
                 self.panel.set_status('未找到可用局域网地址，请连接 Wi-Fi 或网线后重新创建。')
 
-    def retry_tunnel(self):
-        if not self.host or self.host.lan:
+    def _start_tunnel(self):
+        if not self.host or self.host.lan or self.tunnel is not None:
             return
         self._show_loading()
-        if self.tunnel:
-            self.tunnel.stop()
-            self.tunnel.deleteLater()
         self.panel.set_invitation('')
-        self.panel.retry_tunnel.setVisible(True)
-        self.panel.retry_tunnel.setEnabled(False)
         self.panel.tunnel_status.setText('正在建立公共通道，最长等待 60 秒…')
         self.tunnel = PublicTunnel(self)
         self.tunnel.ready.connect(self._tunnel_ready)
@@ -152,16 +147,14 @@ class RoomController(QObject):
         self._finish_loading()
         self.endpoint = endpoint + self.host.guest_path
         self.panel.set_invitation(make_invitation(self.endpoint, self.room))
-        self.panel.retry_tunnel.setEnabled(True)
-        self.panel.tunnel_status.setText('公共通道已连接。临时服务可能中断；重新生成后需分享新链接。')
+        self.panel.tunnel_status.setText('公共通道已连接。若通道中断，请退出房间后重新创建并分享新邀请。')
 
     def _tunnel_failed(self, text):
         if self.sender() is not self.tunnel:
             return
         self._finish_loading()
         self.panel.set_invitation('')
-        self.panel.retry_tunnel.setEnabled(True)
-        self.panel.tunnel_status.setText(text)
+        self.panel.tunnel_status.setText(text + '\n请退出房间后重新创建，或使用其他连接方式。')
 
     def _failed(self, text):
         if self.sender() is not self.host:
@@ -190,7 +183,6 @@ class RoomController(QObject):
         self.integrated = False
         self.endpoint = ''
         self.panel.set_invitation('')
-        self.panel.retry_tunnel.hide()
         self.panel.lan_address.hide()
         self.panel.tunnel_status.clear()
         self.panel.set_in_room(False)

@@ -59,7 +59,6 @@ class MainWindow(QMainWindow):
         from app.room_controller import RoomController
         self._rooms = RoomController(self)
         self._room_panel.cancel_requested.connect(self._rooms.cancel)
-        self._room_panel.retry_tunnel.clicked.connect(self._rooms.retry_tunnel)
         self._room_panel.lan_address.currentIndexChanged.connect(self._rooms.update_lan_invitation)
         self._room_panel.create_requested.connect(self._on_create_room)
         self._room_panel.join_requested.connect(self._on_join_room)

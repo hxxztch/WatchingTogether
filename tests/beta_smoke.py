@@ -199,11 +199,18 @@ def main():
                 window._rooms.tunnel.ready.emit('wss://test.trycloudflare.com')
                 wait(lambda: window._rooms.loading is None)
                 assert QApplication.activeModalWidget() is None
-                window._rooms.retry_tunnel()
-                assert window._rooms.loading is not None
+                window._rooms.cancel()
+                QTest.qWait(150)
+                window._on_create_room('host')
+                wait(lambda: window._rooms.tunnel is not None)
                 window._rooms.tunnel.failed.emit('controlled failure')
                 wait(lambda: window._rooms.loading is None)
-                window._rooms.retry_tunnel()
+                assert 'controlled failure' in window._room_panel.tunnel_status.text()
+                assert not hasattr(window._room_panel, 'retry_tunnel')
+                window._rooms.cancel()
+                QTest.qWait(150)
+                window._on_create_room('host')
+                wait(lambda: window._rooms.loading is not None)
                 window._rooms.loading.cancel_button.click()
                 assert window._rooms.loading is None and window._rooms.host is None
                 assert QApplication.activeModalWidget() is None

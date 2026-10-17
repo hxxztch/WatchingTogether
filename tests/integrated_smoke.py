@@ -7,6 +7,7 @@ import time
 import traceback
 import logging
 import gc
+from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,7 @@ from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QPushButton, QMessageBox
 from app.ui.main_window import MainWindow
 import app.config as config
 
@@ -71,7 +72,7 @@ def main():
             QTest.mouseClick(host._room_panel.management.findChild(QPushButton, 'create_btn'), Qt.LeftButton)
             wait(lambda: host._room_ready)
             wait(lambda: bool(host._room_panel.invitation.text()) or
-                         host._room_panel.retry_tunnel.isEnabled() and host._rooms.tunnel is not None, 70)
+                         host._rooms.tunnel is not None and host._rooms.loading is None, 70)
             invitation = host._room_panel.invitation.text()
             assert invitation, host._room_panel.tunnel_status.text()
             if public:
@@ -93,7 +94,16 @@ def main():
                 assert panel.management_status.parentWidget() is panel.members_card
                 assert panel.invitation.parentWidget() is panel.management
                 assert panel.copy_invitation.parentWidget() is panel.management
-                assert panel.retry_tunnel.parentWidget() is panel.management
+                assert not hasattr(panel, 'retry_tunnel')
+                room_before = window._room_code
+                with patch.object(QMessageBox, 'information') as prompt:
+                    for name in ('create_btn', 'join_btn'):
+                        button = panel.management.findChild(QPushButton, name)
+                        assert button.isEnabled()
+                        button.click()
+                    assert prompt.call_count == 2
+                    assert all(call.args[2] == '您已在房间中，请先退出' for call in prompt.call_args_list)
+                assert window._room_code == room_before and window._room_ready
                 assert panel.members_card.findChildren(QPushButton) == [panel.cancel_button]
                 assert panel.cancel_button.text() == '离开房间'
                 window._on_latency(42)

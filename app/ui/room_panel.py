@@ -148,9 +148,6 @@ class RoomPanel(QWidget):
         self.copy_invitation.setEnabled(False)
         self.copy_invitation.clicked.connect(lambda: QApplication.clipboard().setText(self.invitation.text()))
         management.addWidget(self.copy_invitation)
-        self.retry_tunnel = QPushButton('重新生成异地邀请')
-        self.retry_tunnel.hide()
-        management.addWidget(self.retry_tunnel)
         self.tunnel_status = QLabel()
         self.tunnel_status.setWordWrap(True)
         self.tunnel_status.setTextFormat(Qt.PlainText)
@@ -257,7 +254,7 @@ class RoomPanel(QWidget):
 
     def set_busy(self, busy):
         self.cancel_button.setText('取消连接' if busy and not self._in_room else '离开房间')
-        self._entry.setEnabled(not busy)
+        self._entry.setEnabled(self._in_room or not busy)
         self.mode.setEnabled(not busy)
         self._connection_body.setEnabled(not busy)
 
@@ -298,6 +295,9 @@ class RoomPanel(QWidget):
         return self._server_input.text().strip() or "ws://localhost:9877"
 
     def _on_create(self):
+        if self._in_room:
+            QMessageBox.information(self, '提示', '您已在房间中，请先退出')
+            return
         name = self.get_name()
         if not name:
             QMessageBox.warning(self, "提示", "请先到个人中心设置并保存昵称。")
@@ -306,6 +306,9 @@ class RoomPanel(QWidget):
         self.create_requested.emit(name)
 
     def _on_join(self):
+        if self._in_room:
+            QMessageBox.information(self, '提示', '您已在房间中，请先退出')
+            return
         name = self.get_name()
         room = self._room_input.text().strip()
         if not name:
