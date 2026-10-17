@@ -91,7 +91,11 @@ def main():
                 panel = window._room_panel
                 assert panel.room_code_label.parentWidget() is panel.members_card
                 assert panel.management_status.parentWidget() is panel.members_card
-                assert panel.invitation.parentWidget() is panel.members_card
+                assert panel.invitation.parentWidget() is panel.management
+                assert panel.copy_invitation.parentWidget() is panel.management
+                assert panel.retry_tunnel.parentWidget() is panel.management
+                assert panel.members_card.findChildren(QPushButton) == [panel.cancel_button]
+                assert panel.cancel_button.text() == '离开房间'
                 window._on_latency(42)
                 assert '2 人' in panel.members_heading.text() and '42 ms' in panel.members_heading.text()
             print('PASS: actual public WebSocket route' if public else 'PASS: authenticated LAN invitation', flush=True)
