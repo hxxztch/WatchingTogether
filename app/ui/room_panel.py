@@ -369,4 +369,7 @@ class RoomPanel(QWidget):
         self._status.setStyleSheet(f"color: {color}; font-size: 11px;")
 
     def get_name(self) -> str:
+        provider = getattr(self, 'nickname_provider', None)
+        if provider is not None:
+            return provider()
         return _cfg_load().get('nickname', '').strip()

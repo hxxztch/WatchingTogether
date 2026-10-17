@@ -14,7 +14,7 @@ from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from app.player import mpv
 from app.ui.main_window import MainWindow
 import app.config as config
@@ -67,6 +67,54 @@ def main():
             profile.nickname.setText('NextName')
             profile.save_name()
             assert window._my_name == 'ExistingRoomName'
+            # Focus loss saves without clicking Save; invalid drafts must never
+            # silently create/join using the previously saved identity.
+            window.activateWindow()
+            profile.nickname.setFocus()
+            QTest.qWait(100)
+            profile.nickname.setText('AutoSaved')
+            profile.save_button.setFocus()
+            QTest.qWait(100)
+            assert config.load()['nickname'] == 'AutoSaved'
+            panel = window._room_panel
+            creates, joins = [], []
+            def record_create(name):
+                creates.append(name)
+            panel.create_requested.connect(record_create)
+            def record_join(room, name):
+                joins.append((room, name))
+            panel.join_requested.connect(record_join)
+            panel.create_requested.disconnect(window._on_create_room)
+            panel.join_requested.disconnect(window._on_join_room)
+            try:
+                for blank in ('', '   ', '\u3000'):
+                    profile.nickname.setText(blank)
+                    assert profile.feedback.text()
+                    for mode in range(3):
+                        panel.mode.setCurrentIndex(mode)
+                        panel._room_input.setText('1234')
+                        with patch.object(QMessageBox, 'warning') as warning:
+                            panel._on_create()
+                            panel._on_join()
+                            assert warning.call_count == 2
+                    assert config.load()['nickname'] == ''
+                assert not creates and not joins
+                profile.nickname.setText('NextName')
+                with patch('app.ui.profile.save', return_value=False), patch.object(QMessageBox, 'warning'):
+                    panel._on_create()
+                    panel._on_join()
+                    assert not creates and not joins
+                panel._on_create()
+                panel._on_join()
+                assert creates == ['NextName'] and joins == [('1234', 'NextName')]
+                assert config.load()['nickname'] == 'NextName'
+            finally:
+                panel.create_requested.disconnect(record_create)
+                panel.join_requested.disconnect(record_join)
+                panel.create_requested.connect(window._on_create_room)
+                panel.join_requested.connect(window._on_join_room)
+                panel.mode.setCurrentIndex(0)
+            print('PASS: nickname focus-loss save; all room modes reject blank/whitespace and failed saves', flush=True)
             window._controls.set_bili_status(True, '测试账户')
             assert '测试账户' in profile.account.text() and profile.logout.isVisible()
             profile.logout.click()
