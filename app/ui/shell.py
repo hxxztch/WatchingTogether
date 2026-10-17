@@ -340,7 +340,9 @@ class DesktopShell(QWidget):
         if owner._room_ready:
             room += " · " + str(owner._room_panel._member_list.count()) + " 人在线"
         self.room_status.setText(room)
-        self.theatre_status.setText(room if owner._room_code else "独自观影也很好")
+        latency = owner._room_panel._latency
+        latency_text = f'{latency:.0f} ms' if owner._room_ready and latency is not None else '—'
+        self.theatre_status.setText(room + ' · 延迟 ' + latency_text if owner._room_code else "独自观影也很好")
         player = owner._player
         self.playback_status.setText(
             ("播放中" if player.is_playing else "已暂停") + " · " +

@@ -108,6 +108,8 @@ def main():
                 assert panel.cancel_button.text() == '离开房间'
                 window._on_latency(42)
                 assert '2 人' in panel.members_heading.text() and '42 ms' in panel.members_heading.text()
+                window._shell.refresh_status()
+                assert '42 ms' in window._shell.theatre_status.text()
             print('PASS: actual public WebSocket route' if public else 'PASS: authenticated LAN invitation', flush=True)
             generation = guest._network._generation
             token = guest._network._session['token']
@@ -129,6 +131,29 @@ def main():
             guest._on_chat('integration-check')
             wait(lambda: any('integration-check' in host._room_panel._chat_list.item(i).text()
                              for i in range(host._room_panel._chat_list.count())))
+            controls = host._controls
+            controls._bar_danmaku_input.setText('bar-enter-check')
+            QTest.keyClick(controls._bar_danmaku_input, Qt.Key_Return)
+            controls._bar_danmaku_input.setText('bar-button-check')
+            controls._bar_danmaku_btn.click()
+            wait(lambda: all(any(text in guest._room_panel._chat_list.item(i).text()
+                                 for i in range(guest._room_panel._chat_list.count()))
+                             for text in ('bar-enter-check', 'bar-button-check')))
+            assert not controls._bar_danmaku_input.text()
+            host.resize(1120, 720)
+            host._position_controls()
+            controls.layout().activate()
+            row = [controls._play_btn, controls._time_stack, controls._seek_bar,
+                   controls._vol_btn, controls._bar_danmaku_input, controls._bar_danmaku_btn, controls._fs_btn]
+            assert max(w.geometry().center().y() for w in row) - min(w.geometry().center().y() for w in row) <= 1
+            assert all(controls.rect().contains(w.geometry()) for w in row)
+            controls.show()
+            controls.activateWindow()
+            controls._bar_danmaku_input.setFocus()
+            QTest.qWait(100)
+            assert host._controls_interacting(), 'Typing must keep controls visible'
+            controls._bar_danmaku_input.clearFocus()
+            print('PASS: theatre latency; single-row danmaku sends by Enter/button to peer', flush=True)
             host._on_toggle_play()
             wait(lambda: all(w._player.is_playing for w in windows))
             old_player = host._player._player

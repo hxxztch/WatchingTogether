@@ -184,7 +184,7 @@ class ControlsBar(QWidget):
         )
         lay = QVBoxLayout(dlg)
         lay.setSpacing(8)
-        lay.addWidget(QLabel("\u8F93\u5165\u89C6\u9891\u7F51\u5740\uFF08\u652F\u6301B\u7AD9\u3001YouTube\u7B49\uFF09\uFF1A"))
+        lay.addWidget(QLabel("输入视频网址（支持b站和视频直链）："))
         url_input = QLineEdit()
         url_input.setPlaceholderText("https://...")
         url_input.setStyleSheet(
@@ -207,10 +207,13 @@ class ControlsBar(QWidget):
 
 
     def _on_danmaku(self):
-        msg = self._danmaku_input.text().strip()
+        self._send_danmaku(self._danmaku_input)
+
+    def _send_danmaku(self, field):
+        msg = field.text().strip()
         if msg:
             self.danmaku_sent.emit(msg)
-            self._danmaku_input.clear()
+            field.clear()
     def _on_toggle_play(self):
         self.play_toggled.emit()
 

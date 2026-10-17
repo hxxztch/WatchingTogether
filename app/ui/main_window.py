@@ -887,6 +887,13 @@ class MainWindow(QMainWindow):
             self._controls._vol_popup.hide()
             return
         origin = self._player.mapToGlobal(self._player.rect().topLeft())
+        compact = self._player.width() < 680
+        self._controls.layout().setSpacing(4 if compact else 10)
+        margin = 8 if compact else 14
+        self._controls.layout().setContentsMargins(margin, 10, margin, 12)
+        for button in (self._controls._play_btn, self._controls._stop_btn,
+                       self._controls._vol_btn, self._controls._fs_btn):
+            button.setFixedWidth(32 if compact else 38)
         ch = self._controls.sizeHint().height()
         self._controls.setGeometry(origin.x(), origin.y() + self._player.height() - ch,
                                    self._player.width(), ch)
@@ -908,7 +915,8 @@ class MainWindow(QMainWindow):
         return QApplication.activeWindow() in (self, self._controls)
 
     def _controls_interacting(self):
-        return (self._controls.is_editing_time or self._controls._dragging_seek or
+        return (self._controls._bar_danmaku_input.hasFocus() or
+                self._controls.is_editing_time or self._controls._dragging_seek or
                 self._controls._seek_bar.isSliderDown() or self._controls._vol_slider_v.isSliderDown() or
                 self._controls._vol_popup.isVisible())
 
