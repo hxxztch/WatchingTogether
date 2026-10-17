@@ -124,6 +124,20 @@ def main():
             window._switch_page(1)
             long_title = '【MMD】形而上のライブ：エントフィールト ディフォロス [INTEGRALACTIA] 【4K】' * 5
             window._controls.set_media_title(long_title)
+            window._switch_page(0)
+            window._shell.refresh_status()
+            QTest.qWait(100)
+            home_title = window._shell.playback_title
+            assert home_title.text() == home_title.toolTip() == long_title
+            assert len(home_title.display_lines()) == 2 and home_title.display_lines()[-1].endswith('…')
+            assert home_title.height() >= home_title.fontMetrics().lineSpacing() * 2
+            assert all(home_title.fontMetrics().horizontalAdvance(line) <= home_title.width()
+                       for line in home_title.display_lines())
+            window._controls.set_media_title('short.mp4')
+            window._shell.refresh_status()
+            assert home_title.text() == 'short.mp4'
+            window._controls.set_media_title(long_title)
+            window._switch_page(1)
             QTest.qWait(200)
             title = window._controls._media_title
             lines = title.display_lines()

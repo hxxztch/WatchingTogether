@@ -286,6 +286,10 @@ class DesktopShell(QWidget):
         now_layout.addWidget(self.room_status)
         now_layout.addSpacing(6)
         now_layout.addWidget(label("正在播放", "subtle"))
+        from app.ui.elided_title import ElidedTitle
+        self.playback_title = ElidedTitle('尚未打开视频')
+        self.playback_title.setObjectName('cardTitle')
+        now_layout.addWidget(self.playback_title)
         self.playback_status = label("等待一部好影片", "cardTitle", True)
         now_layout.addWidget(self.playback_status)
         now_layout.addStretch()
@@ -344,6 +348,9 @@ class DesktopShell(QWidget):
         latency_text = f'{latency:.0f} ms' if owner._room_ready and latency is not None else '—'
         self.theatre_status.setText(room + ' · 延迟 ' + latency_text if owner._room_code else "独自观影也很好")
         player = owner._player
+        title = owner._controls._media_title.text()
+        self.playback_title.setText(title)
+        self.playback_title.setToolTip(title)
         self.playback_status.setText(
             ("播放中" if player.is_playing else "已暂停") + " · " +
             str(int(player.position // 60)).zfill(2) + ":" + str(int(player.position % 60)).zfill(2)
