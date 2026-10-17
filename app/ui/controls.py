@@ -192,7 +192,7 @@ class ControlsBar(QWidget):
             "border: 1px solid #d9c8b7; border-radius: 3px; padding: 6px 8px; }"
         )
         lay.addWidget(url_input)
-        login_hint = QLabel("在其他功能中登录bilibili账号以获取更高的B站视频清晰度")
+        login_hint = QLabel("登录bilibili账号以获取更高的B站视频清晰度")
         login_hint.setStyleSheet("color: #927b66; font-size: 11px;")
         lay.addWidget(login_hint)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
