@@ -39,9 +39,9 @@ QToolButton#nav { border: none; border-radius: 9px; padding: 11px; background: t
 QToolButton#nav:hover { background: #ece1d7; }
 QToolButton#nav:checked { background: #e9d6c4; color: #9b5937; font-weight: 600; }
 QToolButton#collapse { border: none; border-radius: 6px; background: #eae0d6; padding: 6px; }
-QListWidget { background: #faf8f5; border: 1px solid #eee7e0; border-radius: 8px; padding: 6px; }
-QListWidget::item { padding: 5px 3px; }
-QListWidget::item:selected { background: #eedbc9; color: #66462f; }
+QListWidget, QListView { background: #faf8f5; border: 1px solid #eee7e0; border-radius: 8px; padding: 6px; }
+QListWidget::item, QListView::item { padding: 5px 3px; }
+QListWidget::item:selected, QListView::item:selected { background: #eedbc9; color: #66462f; }
 QSlider::groove:horizontal { background: #e5dbd0; height: 4px; border-radius: 2px; }
 QSlider::sub-page:horizontal { background: #c78b63; border-radius: 2px; }
 QSlider::handle:horizontal { background: #b8754c; width: 12px; margin: -4px 0; border-radius: 6px; }
@@ -182,6 +182,7 @@ class DesktopShell(QWidget):
         room_layout = QVBoxLayout(room_page)
         room_layout.setContentsMargins(24, 24, 24, 24)
         room_layout.addWidget(owner._room_panel.management, 0, Qt.AlignTop)
+        room_layout.addWidget(owner._room_panel.members_card, 0, Qt.AlignTop)
         room_layout.addStretch()
         rooms.setWidget(room_page)
         self.pages.addWidget(rooms)

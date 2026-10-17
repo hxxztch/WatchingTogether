@@ -50,13 +50,8 @@ class ProfilePage(QWidget):
         buttons.addStretch()
         layout.addLayout(buttons)
         layout.addStretch()
-        owner._room_panel._name_input.textChanged.connect(self._room_name_changed)
         owner._controls.bili_status_changed.connect(self.set_bili_status)
         self.set_bili_status(owner._controls._bili_logged_in, owner._controls._bili_uname)
-
-    def _room_name_changed(self, text):
-        if not self.nickname.hasFocus():
-            self.nickname.setText(text)
 
     def save_name(self):
         name = self.nickname.text().strip()
@@ -66,10 +61,6 @@ class ProfilePage(QWidget):
         if not save(nickname=name):
             self.feedback.setText('保存失败，请检查配置目录的写入权限。')
             return
-        field = self.owner._room_panel._name_input
-        field.blockSignals(True)
-        field.setText(name)
-        field.blockSignals(False)
         self.feedback.setText('昵称已保存。')
 
     def set_bili_status(self, logged_in, name=''):

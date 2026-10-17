@@ -57,8 +57,17 @@ def main():
             host._switch_page(2)
             assert not host._network.isRunning(), 'Offline startup must not retry a server'
             host._room_panel.mode.setCurrentIndex(0 if public else 1)
-            host._room_panel._name_input.setText('owner')
-            assert host._room_panel._name_input.isVisible(), 'Room entry must be visible'
+            host._shell.profile.nickname.setText('owner')
+            host._shell.profile.save_name()
+            assert not hasattr(host._room_panel, '_name_input')
+            assert host._room_panel._entry.isVisible(), 'Room entry must be visible'
+            panel = host._room_panel
+            panel.mode.setCurrentIndex(2)
+            assert panel.invitation.isHidden() and panel.copy_invitation.isHidden()
+            panel._server_input.setText('ws://127.0.0.1:9877')
+            assert panel.get_name() == 'owner', 'Server settings must preserve profile nickname'
+            panel.mode.setCurrentIndex(0 if public else 1)
+            assert not panel.invitation.isHidden()
             QTest.mouseClick(host._room_panel.management.findChild(QPushButton, 'create_btn'), Qt.LeftButton)
             wait(lambda: host._room_ready)
             wait(lambda: bool(host._room_panel.invitation.text()) or
@@ -71,6 +80,9 @@ def main():
             guest._on_join_room(invitation, 'viewer')
             wait(lambda: guest._room_ready, 95 if public else 35)
             wait(lambda: host._room_panel._member_list.count() == 2)
+            assert host._room_panel.room_members.model().rowCount() == 2
+            assert guest._room_panel.room_members.model().rowCount() == 2
+            assert host._room_code in host._room_panel.room_code_label.text()
             print('PASS: actual public WebSocket route' if public else 'PASS: authenticated LAN invitation', flush=True)
             generation = guest._network._generation
             token = guest._network._session['token']
@@ -110,6 +122,8 @@ def main():
             wait(lambda: not guest._room_code and not guest._network.isRunning())
             assert host._rooms.host is None and host._rooms.tunnel is None
             assert '解散' in guest._room_panel._status.text()
+            assert all(w._room_panel.room_members.model().rowCount() == 0 for w in windows)
+            assert all(w._room_panel.room_code_label.isHidden() for w in windows)
             print('PASS: +/-5 sync, chat, Rooms PiP, host disband and worker cleanup', flush=True)
             # Recreate and cancel while startup is pending: no late signals revive a room.
             host._room_panel.mode.setCurrentIndex(1)

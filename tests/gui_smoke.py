@@ -88,6 +88,12 @@ def main():
             wait_for(lambda: guest._room_ready)
             third._on_join_room(host._room_code, "third")
             wait_for(lambda: third._room_ready)
+            wait_for(lambda: host._room_panel.room_members.model().rowCount() == 3)
+            for window in windows:
+                panel = window._room_panel
+                assert panel.invitation.isHidden() and panel.copy_invitation.isHidden()
+                assert not panel.room_code_label.isHidden()
+                assert window._room_code in panel.room_code_label.text()
             host._controls.set_position(0, 20)
             QTest.mouseClick(host._controls._time_label, Qt.LeftButton)
             host._controls._time_editor.setText("00:04")
