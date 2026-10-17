@@ -18,3 +18,5 @@ config.json
 build_dependencies.log
 tools/cloudflared.exe
 tools/*.download
+/审查与测试报告.txt
+/一体化方案与验收.txt
