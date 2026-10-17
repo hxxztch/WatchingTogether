@@ -272,14 +272,14 @@ class MainWindow(QMainWindow):
             return
         self._room_ready = False
         self._player.set_speed(1.0)
+        self._room_panel.set_latency(None)
         self._room_panel.set_status("连接中断，正在自动重连...", "#FFD54F")
 
     def _on_latency(self, milliseconds):
         if not self._current_network_event():
             return
         if self._room_ready:
-            self._room_panel.set_status(
-                f"房间 {self._room_code} · 延迟 {milliseconds:.0f} ms", "#4CAF50")
+            self._room_panel.set_latency(milliseconds)
 
     def _apply_room_state(self, state, force=False):
         if not self._room_ready or self._player.is_loading:

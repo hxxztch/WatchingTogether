@@ -67,7 +67,7 @@ def main():
             panel._server_input.setText('ws://127.0.0.1:9877')
             assert panel.get_name() == 'owner', 'Server settings must preserve profile nickname'
             panel.mode.setCurrentIndex(0 if public else 1)
-            assert not panel.invitation.isHidden()
+            assert panel.invitation.isHidden() and panel.copy_invitation.isHidden()
             QTest.mouseClick(host._room_panel.management.findChild(QPushButton, 'create_btn'), Qt.LeftButton)
             wait(lambda: host._room_ready)
             wait(lambda: bool(host._room_panel.invitation.text()) or
@@ -83,6 +83,17 @@ def main():
             assert host._room_panel.room_members.model().rowCount() == 2
             assert guest._room_panel.room_members.model().rowCount() == 2
             assert host._room_code in host._room_panel.room_code_label.text()
+            assert guest._room_panel.invitation.text() == invitation
+            assert not guest._room_panel.copy_invitation.isHidden()
+            guest._room_panel.copy_invitation.click()
+            assert QApplication.clipboard().text() == invitation
+            for window in windows:
+                panel = window._room_panel
+                assert panel.room_code_label.parentWidget() is panel.members_card
+                assert panel.management_status.parentWidget() is panel.members_card
+                assert panel.invitation.parentWidget() is panel.members_card
+                window._on_latency(42)
+                assert '2 人' in panel.members_heading.text() and '42 ms' in panel.members_heading.text()
             print('PASS: actual public WebSocket route' if public else 'PASS: authenticated LAN invitation', flush=True)
             generation = guest._network._generation
             token = guest._network._session['token']
@@ -123,7 +134,9 @@ def main():
             assert host._rooms.host is None and host._rooms.tunnel is None
             assert '解散' in guest._room_panel._status.text()
             assert all(w._room_panel.room_members.model().rowCount() == 0 for w in windows)
-            assert all(w._room_panel.room_code_label.isHidden() for w in windows)
+            assert all(w._room_panel.room_code_label.text() == '尚未加入房间' for w in windows)
+            assert all('0 人' in w._room_panel.members_heading.text() and '—' in w._room_panel.members_heading.text() for w in windows)
+            assert all(w._room_panel.invitation.isHidden() and w._room_panel.copy_invitation.isHidden() for w in windows)
             print('PASS: +/-5 sync, chat, Rooms PiP, host disband and worker cleanup', flush=True)
             # Recreate and cancel while startup is pending: no late signals revive a room.
             host._room_panel.mode.setCurrentIndex(1)

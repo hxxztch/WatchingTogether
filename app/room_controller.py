@@ -78,12 +78,15 @@ class RoomController(QObject):
             return
         self.cancel()
         self.integrated = True
+        self.endpoint = url
         self.connect(url, {'type': 'join_room', 'room': room, 'name': name})
 
     def message(self, message):
         kind = message.get('type')
         if kind in ('room_created', 'room_joined'):
             self.timer.stop()
+            if self.integrated and not self.host and self.endpoint:
+                self.panel.set_invitation(make_invitation(self.endpoint, message['room']))
             if self.host and kind == 'room_created':
                 self.room = message['room']
                 if self.host.lan:

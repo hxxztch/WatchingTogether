@@ -29,6 +29,7 @@ class RoomPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(280)
+        self._latency = None
         self._setup_ui()
         self._in_room = False
         self._load_config()
@@ -45,7 +46,7 @@ class RoomPanel(QWidget):
         management = QVBoxLayout(self.management)
         management.setContentsMargins(24, 24, 24, 24)
         management.setSpacing(14)
-        heading = QLabel('房间')
+        heading = QLabel('创建或加入房间')
         heading.setObjectName('heading')
         management.addWidget(heading)
         explanation = QLabel()
@@ -82,7 +83,6 @@ class RoomPanel(QWidget):
         self._current_server = QLabel("当前服务器: -")
         self._current_server.setObjectName("current_server_label")
         self._current_server.setWordWrap(True)
-        connection.addWidget(self._current_server)
 
         refresh_btn = QPushButton("刷新连接")
         refresh_btn.clicked.connect(self._on_refresh_clicked)
@@ -120,37 +120,48 @@ class RoomPanel(QWidget):
         management.addWidget(no_room)
         no_room.show()
         self._stack.addWidget(QLabel('前往侧栏「房间」邀请朋友一起看。'))
+        self.members_card = QWidget()
+        self.members_card.setObjectName('roomCard')
+        self.members_card.setAttribute(Qt.WA_StyledBackground, True)
+        self.members_card.setMaximumWidth(840)
+        members_layout = QVBoxLayout(self.members_card)
+        members_layout.setContentsMargins(24, 24, 24, 24)
+        members_layout.setSpacing(14)
         self.invitation = QLineEdit()
         self.invitation.setReadOnly(True)
         self.invitation.setPlaceholderText('创建成功后显示邀请链接')
-        self.room_code_label = QLabel()
+        self.room_code_label = QLabel('尚未加入房间')
+        self.room_code_label.setObjectName('heading')
         self.room_code_label.setTextFormat(Qt.PlainText)
         self.room_code_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.room_code_label.hide()
-        management.addWidget(self.room_code_label)
+        members_layout.addWidget(self.room_code_label)
+        self.members_heading = QLabel('当前房间成员 0 人　延迟 —')
+        self.members_heading.setObjectName('subtle')
+        members_layout.addWidget(self.members_heading)
+        members_layout.addWidget(self._current_server)
         self.lan_address = QComboBox()
         self.lan_address.setToolTip('选择朋友可以连接的网卡地址；多网卡时可切换后重新复制邀请。')
         self.lan_address.hide()
-        management.addWidget(self.lan_address)
-        management.addWidget(self.invitation)
+        members_layout.addWidget(self.lan_address)
+        members_layout.addWidget(self.invitation)
         self.copy_invitation = QPushButton('复制邀请链接')
         self.copy_invitation.setEnabled(False)
         self.copy_invitation.clicked.connect(lambda: QApplication.clipboard().setText(self.invitation.text()))
-        management.addWidget(self.copy_invitation)
+        members_layout.addWidget(self.copy_invitation)
         self.retry_tunnel = QPushButton('重新生成异地邀请')
         self.retry_tunnel.hide()
-        management.addWidget(self.retry_tunnel)
+        members_layout.addWidget(self.retry_tunnel)
         self.tunnel_status = QLabel()
         self.tunnel_status.setWordWrap(True)
         self.tunnel_status.setTextFormat(Qt.PlainText)
-        management.addWidget(self.tunnel_status)
+        members_layout.addWidget(self.tunnel_status)
         self.cancel_button = QPushButton('离开 / 取消连接')
         self.cancel_button.clicked.connect(self.cancel_requested)
-        management.addWidget(self.cancel_button)
+        members_layout.addWidget(self.cancel_button)
         self.management_status = QLabel('尚未加入房间')
         self.management_status.setWordWrap(True)
         self.management_status.setTextFormat(Qt.PlainText)
-        management.addWidget(self.management_status)
+        members_layout.addWidget(self.management_status)
         management.addStretch()
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self._mode_changed()
@@ -200,16 +211,7 @@ class RoomPanel(QWidget):
         self._status.setObjectName("status_label")
         layout.addWidget(self._status)
 
-        self.members_card = QWidget()
-        self.members_card.setObjectName('roomCard')
-        self.members_card.setAttribute(Qt.WA_StyledBackground, True)
-        self.members_card.setMaximumWidth(840)
-        members_layout = QVBoxLayout(self.members_card)
-        members_layout.setContentsMargins(24, 24, 24, 24)
-        self.members_heading = QLabel('当前房间成员 · 0 人')
-        self.members_heading.setObjectName('heading')
-        members_layout.addWidget(self.members_heading)
-        self.members_empty = QLabel('尚未加入房间')
+        self.members_empty = QLabel('暂无成员')
         members_layout.addWidget(self.members_empty)
         self.room_members = QListView()
         self.room_members.setWordWrap(True)
@@ -232,11 +234,11 @@ class RoomPanel(QWidget):
     def _mode_changed(self):
         legacy = self.mode.currentIndex() == 2
         self._connection_toggle.setVisible(legacy)
+        self._current_server.setVisible(legacy)
         self._connection_body.setVisible(legacy and self._connection_toggle.isChecked())
         self._room_input.setMaxLength(4 if legacy else 2048)
         self._room_input.setPlaceholderText('例如 1234' if legacy else '粘贴完整邀请链接')
-        self.invitation.setVisible(not legacy)
-        self.copy_invitation.setVisible(not legacy)
+        self._update_invitation_visibility()
         self._connection_help.setText(
             ('所有成员填写相同的服务器地址，创建后分享四位房间号，朋友输入房间号加入。'
              if legacy else
@@ -246,6 +248,12 @@ class RoomPanel(QWidget):
     def set_invitation(self, value):
         self.invitation.setText(value)
         self.copy_invitation.setEnabled(bool(value))
+        self._update_invitation_visibility()
+
+    def _update_invitation_visibility(self):
+        available = self.mode.currentIndex() != 2 and bool(self.invitation.text())
+        self.invitation.setVisible(available)
+        self.copy_invitation.setVisible(available)
 
     def set_busy(self, busy):
         self._entry.setEnabled(not busy)
@@ -321,10 +329,12 @@ class RoomPanel(QWidget):
         if in_room and not self._in_room:
             self._connection_toggle.setChecked(False)
         self._in_room = in_room
-        self._entry.setVisible(not in_room)
+        self._entry.setVisible(True)
         self.set_busy(in_room)
-        self.room_code_label.setText(f'房间号：{room_code}' if in_room else '')
-        self.room_code_label.setVisible(in_room)
+        self.room_code_label.setText(f'房间号：{room_code}' if in_room else '尚未加入房间')
+        if not in_room:
+            self._latency = None
+            self.set_invitation('')
         if in_room:
             self._stack.setCurrentIndex(1)
             self._room_label.setText(f"Room {room_code}")
@@ -353,9 +363,13 @@ class RoomPanel(QWidget):
 
     def _update_member_summary(self):
         count = self._member_list.count()
-        self.members_heading.setText(f'当前房间成员 · {count} 人')
-        self.members_empty.setText('暂无成员' if self._in_room else '尚未加入房间')
+        latency = f'{self._latency:.0f} ms' if self._latency is not None else '—'
+        self.members_heading.setText(f'当前房间成员 {count} 人　延迟 {latency}')
         self.members_empty.setVisible(not count)
+
+    def set_latency(self, milliseconds):
+        self._latency = milliseconds
+        self._update_member_summary()
 
     def add_chat(self, sender: str, msg: str):
         self._chat_list.addItem(f"[{sender}] {msg}")
