@@ -81,6 +81,14 @@ def line_icon(kind, color="#987a63"):
         painter.drawEllipse(8, 3, 8, 8)
         painter.drawArc(4, 12, 16, 12, 0, 180 * 16)
         painter.drawLine(4, 18, 20, 18)
+    elif kind == "settings":
+        painter.drawEllipse(5, 5, 14, 14)
+        painter.drawEllipse(10, 10, 4, 4)
+        for start, end in (((12, 1), (12, 5)), ((12, 19), (12, 23)),
+                           ((1, 12), (5, 12)), ((19, 12), (23, 12)),
+                           ((4, 4), (7, 7)), ((17, 17), (20, 20)),
+                           ((4, 20), (7, 17)), ((17, 7), (20, 4))):
+            painter.drawLine(*start, *end)
     else:
         painter.drawLine(9, 7, 14, 12)
         painter.drawLine(14, 12, 9, 17)
@@ -149,6 +157,18 @@ class DesktopShell(QWidget):
             side.addWidget(button)
             self.nav_buttons.append(button)
         side.addStretch()
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("nav")
+        self.settings_button.setText("设置")
+        self.settings_button.setToolTip("设置")
+        self.settings_button.setAccessibleName("设置")
+        self.settings_button.setIcon(line_icon("settings"))
+        self.settings_button.setIconSize(QSize(22, 22))
+        self.settings_button.setCheckable(True)
+        self.settings_button.setMinimumHeight(46)
+        self.settings_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.settings_button.clicked.connect(lambda: self.page_requested.emit(4))
+        self.nav_buttons.append(self.settings_button)
         self.side_note = label("一起看，才好看。\nv" + CLIENT_VERSION, "subtle")
         side.addWidget(self.side_note)
         self.collapse_button = QToolButton()
@@ -157,6 +177,7 @@ class DesktopShell(QWidget):
         self.collapse_button.clicked.connect(self.toggle_sidebar)
         side.addWidget(self.collapse_button)
         self.collapse_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        side.addWidget(self.settings_button)
         root.addWidget(self.sidebar)
 
         self.pages = QStackedWidget()
@@ -197,6 +218,13 @@ class DesktopShell(QWidget):
         profile_layout.addStretch()
         profile_scroll.setWidget(profile_page)
         self.pages.addWidget(profile_scroll)
+        from app.ui.settings import SettingsPage
+        self.settings = SettingsPage(self)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setWidget(self.settings)
+        self.pages.addWidget(settings_scroll)
+        self.settings.update_available.connect(self._show_update_badge)
         root.addWidget(self.pages, 1)
         self._theatre_layout = theatre_layout
         self.set_page(0)
@@ -314,6 +342,12 @@ class DesktopShell(QWidget):
         self.pages.setCurrentIndex(index)
         for number, button in enumerate(self.nav_buttons):
             button.setChecked(number == index)
+
+    def _show_update_badge(self, version):
+        text = "设置 · 有更新" if version else "设置"
+        self.settings_button.setText(text)
+        self.settings_button.setToolTip(text)
+        self.settings_button.setAccessibleName(text)
 
     def toggle_sidebar(self):
         self.expanded = not self.expanded

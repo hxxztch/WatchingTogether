@@ -31,6 +31,7 @@ def _setup_crash_log():
     sys.excepthook = _excepthook
 
 _setup_crash_log()
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPixmap
 from app.ui.main_window import MainWindow
@@ -59,6 +60,7 @@ def main():
 
     window = MainWindow()
     window.show()
+    QTimer.singleShot(500, lambda: window._shell.settings.check_updates(True))
     sys.exit(app.exec())
 
 

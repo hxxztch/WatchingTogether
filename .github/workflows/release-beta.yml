@@ -1,0 +1,75 @@
+name: Publish beta client
+
+on:
+  push:
+    tags:
+      - 'beta*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.8.20'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: packaging/requirements-lock.txt
+      - name: Check tag and install pinned packages
+        shell: pwsh
+        run: |
+          $version = python -c 'from app.version import CLIENT_VERSION; print(CLIENT_VERSION)'
+          if ($version -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME does not match CLIENT_VERSION $version" }
+          python -m pip install pip==25.0.1
+          python -m pip install -r packaging/requirements-lock.txt
+          python -m pip check
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Verify and build portable client
+        shell: pwsh
+        run: |
+          ./packaging/fetch_cloudflared.ps1
+          python packaging/build_integrated.py build
+          python packaging/verify_integrated.py
+          python packaging/build_integrated.py archive --output dist/beta-archives
+      - name: Build deltas from previous beta releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $current = [version]($env:GITHUB_REF_NAME -replace '^beta', '')
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          foreach ($release in $releases) {
+            $old = [string]$release.tag_name
+            if ($old -notmatch '^beta\d+\.\d+\.\d+$' -or [version]($old -replace '^beta', '') -ge $current) { continue }
+            if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
+            $oldZip = Join-Path $env:RUNNER_TEMP "$old.zip"
+            gh release download $old --repo $env:GITHUB_REPOSITORY --pattern "$old.zip" --dir $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $old" }
+            $deltaZip = "dist/beta-archives/${old}-to-$env:GITHUB_REF_NAME.delta.zip"
+            python packaging/make_delta.py --from-zip $oldZip --to-zip "dist/beta-archives/$env:GITHUB_REF_NAME.zip" --from-version $old --to-version $env:GITHUB_REF_NAME --output $deltaZip
+            if ($LASTEXITCODE -ne 0) { throw "Could not build delta from $old" }
+            Remove-Item -LiteralPath $oldZip
+          }
+      - name: Prepare release notes
+        shell: pwsh
+        run: |
+          $lines = Get-Content '更新日志.txt' -Encoding UTF8
+          if ($lines[0] -notmatch "^$([regex]::Escape($env:GITHUB_REF_NAME))（") { throw 'The changelog must start with the release tag' }
+          $next = 1
+          while ($next -lt $lines.Count -and $lines[$next] -notmatch '^beta\d+\.\d+\.\d+（') { $next++ }
+          $body = ($lines[1..($next - 1)] -join "`n").Trim()
+          if (-not $body) { throw 'Release notes are empty' }
+          Set-Content -LiteralPath release-notes.txt -Value $body -Encoding UTF8
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/beta-archives/*
+          fail_on_unmatched_files: true
+          prerelease: true
+          body_path: release-notes.txt

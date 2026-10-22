@@ -1017,6 +1017,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._closing = True
+        self._shell.settings.stop()
         self._rooms.cancel()
         self._shell.timer.stop()
         self._pip.timer.stop()

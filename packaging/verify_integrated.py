@@ -9,7 +9,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.version import CLIENT_NAME
+from app.version import CLIENT_NAME, CLIENT_VERSION
 
 
 def main():
@@ -18,10 +18,10 @@ def main():
     system = Path(env.get('SystemRoot', r'C:\Windows'))
     env['PATH'] = str(system / 'System32') + os.pathsep + str(system)
     env['QT_QPA_PLATFORM'] = 'windows'
-    report = ROOT / 'build/beta0.1.0/client-check.json'
+    report = ROOT / 'build' / CLIENT_VERSION / 'client-check.json'
     with tempfile.TemporaryDirectory(prefix='film-integrated-package-') as temporary:
         target = Path(temporary) / CLIENT_NAME
-        shutil.copytree(ROOT / 'dist/beta0.1.0' / CLIENT_NAME, target)
+        shutil.copytree(ROOT / 'dist' / CLIENT_VERSION / CLIENT_NAME, target)
         completed = subprocess.run([str(target / (CLIENT_NAME + '.exe')), '--package-check', str(report)],
                                    cwd=str(target), env=env, timeout=75,
                                    creationflags=subprocess.CREATE_NO_WINDOW)

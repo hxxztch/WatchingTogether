@@ -4,9 +4,9 @@ import shutil
 from pathlib import Path
 import build_release as release
 
-release.DIST = release.ROOT / 'dist' / 'beta0.1.0'
-release.WORK = release.ROOT / 'build' / 'beta0.1.0'
-release.CLIENT_HELP = '''超时空会夜机 beta0.1.0（2026-10-17）
+release.DIST = release.ROOT / 'dist' / release.CLIENT_VERSION
+release.WORK = release.ROOT / 'build' / release.CLIENT_VERSION
+release.CLIENT_HELP = f'''超时空会夜机 {release.CLIENT_VERSION}
 Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 
 1. 完整解压后运行 EXE，保留 _internal 文件夹。
@@ -52,4 +52,5 @@ if __name__ == '__main__':
             notices.write('\ncloudflared 2026.10.1 (Apache-2.0): https://github.com/cloudflare/cloudflared\n'
                           'License: _internal/THIRD-PARTY-CLOUDFLARED.txt\n')
     else:
-        release.archive(args.output, names=[release.CLIENT_NAME])
+        release.archive(args.output, names=[release.CLIENT_NAME],
+                        filenames={release.CLIENT_NAME: release.CLIENT_VERSION + '.zip'})

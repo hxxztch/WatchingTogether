@@ -12,6 +12,9 @@ qt = Path(PySide6.__file__).parent
 runtime_names = ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll',
                  'msvcp140_1.dll', 'msvcp140_2.dll', 'msvcp140_codecvt_ids.dll', 'concrt140.dll')
 runtime = [(str(qt / name), '.') for name in runtime_names if (qt / name).is_file()]
+conda_bin = Path(sys.prefix) / 'Library' / 'bin'
+openssl = [(str(path), '.') for pattern in ('libssl-*.dll', 'libcrypto-*.dll')
+           for path in conda_bin.glob(pattern)] if conda_bin.is_dir() else []
 yd_data, yd_bin, yd_hidden = collect_all('yt_dlp')
 import hashlib
 helper = root / 'tools/cloudflared.exe'
@@ -19,13 +22,14 @@ from app.tunnel import CLOUDFLARED_SHA256
 if not helper.is_file() or hashlib.sha256(helper.read_bytes()).hexdigest() != CLOUDFLARED_SHA256:
     raise RuntimeError('Run packaging/fetch_cloudflared.ps1 before building the integrated client')
 data = [(str(root / 'assets'), 'assets'), (str(helper), 'tools'),
+        (str(root / 'packaging/apply_update.ps1'), 'updater'),
         (str(root / 'THIRD-PARTY-CLOUDFLARED.txt'), '.')] + yd_data
 for package in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6',
                 'python-mpv', 'websockets', 'segno'):
     data += copy_metadata(package)
 
 a = Analysis([str(root / 'client.py')], pathex=[str(root)],
-    binaries=[(str(root / 'libmpv/libmpv-2.dll'), 'libmpv')] + runtime + yd_bin,
+    binaries=[(str(root / 'libmpv/libmpv-2.dll'), 'libmpv')] + runtime + openssl + yd_bin,
     datas=data, hiddenimports=yd_hidden + ['websockets.asyncio.client', 'websockets.asyncio.server', 'segno', 'certifi'],
     excludes=['tkinter', 'PyQt5', 'PyQt6', 'numpy', 'scipy', 'pandas', 'matplotlib', 'IPython'],
     noarchive=False, optimize=0)

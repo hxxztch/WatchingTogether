@@ -57,7 +57,7 @@ def build(components=None):
                 '--distpath', str(DIST), '--workpath', str(WORK / component),
                 str(ROOT / 'packaging' / (component + '.spec'))], cwd=str(ROOT), stdout=output, stderr=subprocess.STDOUT)
         if completed.returncode:
-            print(log.read_text(encoding='utf-8')[-6000:])
+            print(log.read_text(encoding='utf-8', errors='replace')[-6000:])
             raise RuntimeError(component + ' build failed')
         package = DIST / name
         (package / '使用说明.txt').write_text(help_text, encoding='utf-8-sig')
@@ -81,13 +81,13 @@ def build(components=None):
         print('Built: ' + str(package), flush=True)
 
 
-def archive(output, names=None):
+def archive(output, names=None, filenames=None):
     import hashlib
     output.mkdir(parents=True, exist_ok=True)
     hashes = []
     for name in (names or (CLIENT_NAME, SERVER_NAME)):
         package = DIST / name
-        target = output / (name + '.zip')
+        target = output / ((filenames or {}).get(name, name + '.zip'))
         if target.exists():
             raise FileExistsError(target)
         with zipfile.ZipFile(target, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
