@@ -15,12 +15,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
-      - uses: actions/setup-python@v5
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           python-version: '3.8.20'
-          architecture: x64
-          cache: pip
-          cache-dependency-path: packaging/requirements-lock.txt
+          activate-environment: build
+          auto-activate: true
+          channels: conda-forge
+          conda-remove-defaults: true
       - name: Check tag and install pinned packages
         shell: pwsh
         run: |
