@@ -93,7 +93,8 @@ def archive(output, names=None, filenames=None):
         with zipfile.ZipFile(target, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path in sorted(package.rglob('*')):
                 if path.is_file():
-                    if path.name in ('config.json', 'crash.log'):
+                    if path.name in ('config.json', 'crash.log', 'crash.log.1', 'crash.log.2',
+                                     'crash.log.3', 'fatal.log', 'fatal.log.1'):
                         continue
                     archive.write(path, path.relative_to(DIST))
         with zipfile.ZipFile(target) as archive:

@@ -17,6 +17,7 @@ from app.ui.room_panel import RoomPanel
 from app.ui.controls import ControlsBar
 from app.ui.danmaku import DanmakuOverlay
 from app.version import CLIENT_NAME
+from app.diagnostics import record_action
 from app.ui.shell import DesktopShell, MiniPlayer, WARM_STYLE, label
 
 logging.basicConfig(level=logging.INFO)
@@ -304,6 +305,7 @@ class MainWindow(QMainWindow):
 
     def _on_net_error(self, err):
         if self._current_network_event() and not self._network._stopping.is_set():
+            logging.warning("Network UI error: %s", err)
             self._room_panel.set_status(err, "#f44336")
 
     def _on_message(self, msg):
@@ -380,6 +382,7 @@ class MainWindow(QMainWindow):
             avid, cid, qn, headers, cookie=load_config().get("bili_cookie", ""), strict=strict)
 
     def _on_create_room(self, name):
+        record_action("room.create", mode=self._room_panel.mode.currentIndex())
         self._my_name = name
         if self._room_panel.mode.currentIndex() != 2:
             self._rooms.create(name)
@@ -390,6 +393,7 @@ class MainWindow(QMainWindow):
         self._network.send({"type": "create_room", "name": name})
 
     def _on_join_room(self, room, name):
+        record_action("room.join", mode=self._room_panel.mode.currentIndex())
         self._my_name = name
         if self._room_panel.mode.currentIndex() != 2:
             self._rooms.join(room, name)
@@ -400,6 +404,7 @@ class MainWindow(QMainWindow):
         self._network.send({"type": "join_room", "room": room, "name": name})
 
     def _on_leave_room(self):
+        record_action("room.leave")
         if self._rooms.host is not None or self._rooms.integrated:
             self._rooms.cancel()
             return
@@ -409,6 +414,7 @@ class MainWindow(QMainWindow):
         self._player.set_speed(1.0)
 
     def _on_bili_login(self):
+        record_action("account.login")
         from app.ui.bili_login_dialog import BiliLoginDialog
         from PySide6.QtWidgets import QDialog
         dialog = BiliLoginDialog(self)
@@ -419,6 +425,7 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
 
     def _on_bili_logout(self):
+        record_action("account.logout")
         from app.config import save as _cfg_save
         if not _cfg_save(bili_cookie="", bili_uid="", bili_uname=""):
             message = '退出登录未保存，请检查配置目录的写入权限后重试。'
@@ -441,6 +448,7 @@ class MainWindow(QMainWindow):
             else:
                 self._controls.set_bili_status(False)
         except Exception:
+            logging.exception("Could not restore account state")
             self._controls.set_bili_status(False)
 
 
@@ -471,6 +479,7 @@ class MainWindow(QMainWindow):
             self._network.send({"type": "seek", "position": pos})
 
     def _on_load_file(self, path):
+        record_action("media.open", source="local")
         self._controls.set_media_title(_os.path.basename(path.replace('\\', '/')), '本地视频')
         self._empty_stage.hide()
         self._invalidate_quality_request()
@@ -583,6 +592,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _on_load_url(self, url):
+        record_action("media.open", source="url")
         """Load from URL.  B站 videos use unified DASH-first path."""
         from urllib.parse import urlsplit, unquote
         parsed = urlsplit(url)
@@ -1000,22 +1010,27 @@ class MainWindow(QMainWindow):
             self._import_subtitle(path)
 
     def _import_subtitle(self, path):
+        record_action("subtitle.import")
         try:
             self._player.load_subtitle(path)
             self._room_panel.set_status('已导入字幕：' + _os.path.basename(path), '#95724f')
             self._room_panel.add_chat('系统', '外挂字幕已在本机加载；右侧可撤销。')
         except Exception:
+            logging.exception("Subtitle import failed")
             self._room_panel.set_status('字幕未能加载，请确认视频已打开、字幕文件格式有效。', '#b36b4a')
 
     def _undo_subtitle(self):
+        record_action("subtitle.undo")
         try:
             removed = self._player.undo_subtitle()
             self._room_panel.set_status('已撤销最近导入的外挂字幕，原文件保留。' if removed else
                                         '没有可以撤销的手动外挂字幕。', '#95724f')
         except Exception:
+            logging.exception("Subtitle undo failed")
             self._room_panel.set_status('字幕移除失败，请稍后重试。', '#b36b4a')
 
     def closeEvent(self, event):
+        record_action("client.close")
         self._closing = True
         self._shell.settings.stop()
         self._rooms.cancel()

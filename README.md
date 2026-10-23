@@ -56,11 +56,13 @@ pip install -r requirements.txt
 
 ### 客户端更新与自动发布
 
-便携版启动后会在后台检查同一 beta 通道的 GitHub Release。侧边栏底部的「设置」可查看当前版本、手动检查、查看差异文件和下载更新。发布页提供完整便携包 `betaX.Y.Z.zip`；压缩包仍只有一个顶层目录，里面是 EXE、`_internal` 和说明文件。新版同时提供从各旧 beta 版本升级的 `旧版-to-新版.delta.zip` 和对应 `.delta.json` 文件清单。便携版优先自动下载适用的差异包，用户点击「安装更新并重启」后才会替换文件；个人 `config.json` 和 `crash.log` 不在更新范围内。若找不到适用的差异包，可手动下载完整 ZIP。源码运行时仅检查更新并提供完整便携包下载，不改动 Git 工作区。
+便携版启动后会从 [静态发布清单](https://raw.githubusercontent.com/hxxztch/WatchingTogether/update-feed/releases.json) 检查同一 beta 通道的新版本；静态清单不可用时回退 GitHub Releases API。侧边栏底部的「设置」可查看当前版本、手动检查、查看差异文件和下载更新。发布页提供完整便携包 `betaX.Y.Z.zip`；压缩包仍只有一个顶层目录，里面是 EXE、`_internal` 和说明文件。新版同时提供从各旧 beta 版本升级的 `旧版-to-新版.delta.zip` 和对应 `.delta.json` 文件清单。便携版优先自动下载适用的差异包，用户点击「安装更新并重启」后才会替换文件；个人 `config.json` 和诊断日志不在更新范围内。若找不到适用的差异包，可手动下载完整 ZIP。源码运行时仅检查更新并提供完整便携包下载，不改动 Git 工作区。
 
 2026-10-23 修订的 beta0.1.1 修复了 GitHub Release 文件跳转导致的下载校验失败。此前下载的 beta0.1.1 包需要手动替换一次：解压发布页的新版完整 ZIP，关闭旧客户端后将旧 EXE 同目录的 `config.json` 复制到新 EXE 目录。修订版随后可用差异包升级到 beta0.1.2。
 
-发布新 beta 时，先修改 `app/version.py` 中的 `CLIENT_VERSION`，提交并推送代码，再推送同名标签（例如 `beta0.1.1`）。[GitHub Actions](.github/workflows/release-beta.yml) 会在 Windows 上安装 `packaging/requirements-lock.txt`、构建并校验便携包、生成完整 ZIP 与差异包，然后创建 Release。无需手工打包或上传文件。只有标签名与代码版本一致时才会发布。
+发布新 beta 时，先修改 `app/version.py` 中的 `CLIENT_VERSION`，提交并推送代码，再推送同名标签。[GitHub Actions](.github/workflows/release-beta.yml) 会在 Windows 上安装 `packaging/requirements-lock.txt`、构建并校验便携包、生成完整 ZIP 与差异包，创建 Release 后更新静态发布清单。无需手工打包或上传文件。只有标签名与代码版本一致时才会发布。
+
+客户端把启动环境、关键操作、异常与更新脚本步骤写入 EXE 同目录的 `crash.log`（每文件 2 MB，保留 3 份历史）；Python 原生故障堆栈写入 `fatal.log`。目录不可写时，日志写入 `%LOCALAPPDATA%\WatchingTogether\logs`。日志不会自动上传，不记录昵称、房间邀请、聊天、媒体路径或账号 Cookie。反馈问题时可提供对应时间段的日志；分享前仍应检查日志中的异常堆栈是否含个人路径。
 
 ### 启动服务端
 

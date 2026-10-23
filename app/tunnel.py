@@ -1,5 +1,6 @@
 """Optional Quick Tunnel, owned by the desktop app and started only by the host."""
 import hashlib
+import logging
 import re
 import sys
 import tempfile
@@ -41,6 +42,7 @@ class PublicTunnel(QObject):
             if digest != CLOUDFLARED_SHA256:
                 raise ValueError('checksum')
         except (OSError, ValueError):
+            logging.error("Tunnel helper missing or checksum mismatch")
             self.failed.emit('内置连接组件缺失或校验失败，请使用完整安装包；仍可使用局域网或原服务器方式。')
             return
         self._temp = tempfile.TemporaryDirectory(prefix='film-tunnel-')
@@ -60,6 +62,7 @@ class PublicTunnel(QObject):
             try:
                 self._job = own_process(int(self.process.processId()))
             except OSError:
+                logging.exception("Tunnel process ownership failed")
                 self.failed.emit('无法安全管理连接组件，已停止异地连接；可使用局域网或原服务器方式。')
                 self.stop()
 
@@ -83,15 +86,19 @@ class PublicTunnel(QObject):
             self.ready.emit(self._url)
 
     def _timeout(self):
+        logging.warning("Tunnel startup timed out")
         self.failed.emit('公共通道连接超时。请重试，或使用局域网 / 原服务器连接。')
         self.stop()
 
     def _error(self, error):
+        logging.error("Tunnel process error code=%s stopping=%s", int(error), self._stopping)
         if not self._stopping and error == QProcess.FailedToStart:
             self.timer.stop()
             self.failed.emit('连接组件无法启动，请检查完整安装包。')
 
     def _finished(self, *args):
+        logging.info("Tunnel process finished exit_code=%s exit_status=%s stopping=%s",
+                     self.process.exitCode(), int(self.process.exitStatus()), self._stopping)
         self.timer.stop()
         if not self._stopping:
             self.failed.emit('公共通道已停止，请重新创建邀请或使用原服务器连接。')

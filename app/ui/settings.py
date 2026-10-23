@@ -15,8 +15,9 @@ from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkProxyFactory,
                                QNetworkReply, QNetworkRequest)
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
-from app.updates import RELEASES_API, RELEASES_PAGE, find_update
+from app.updates import RELEASES_API, RELEASES_FEED, RELEASES_PAGE, find_update
 from app.version import CLIENT_VERSION
+from app.diagnostics import record_action, recent_actions
 from app.ui.shell import card, label
 
 
@@ -28,6 +29,7 @@ class SettingsPage(QWidget):
         QNetworkProxyFactory.setUseSystemConfiguration(True)
         self._network = QNetworkAccessManager(self)
         self._check_reply = None
+        self._check_source = ""
         self._manifest_reply = None
         self._download_reply = None
         self._output = None
@@ -118,8 +120,13 @@ class SettingsPage(QWidget):
             return
         self.check_button.setEnabled(False)
         self._automatic = automatic is True
+        record_action("update.check", automatic=self._automatic)
         self.status.setText("正在从 GitHub 检查更新…")
-        reply = self._network.get(self._request(RELEASES_API, 12000))
+        self._start_check(RELEASES_FEED, "static_feed")
+
+    def _start_check(self, url, source):
+        self._check_source = source
+        reply = self._network.get(self._request(url, 12000))
         self._check_reply = reply
         reply.finished.connect(lambda: self._finish_check(reply))
 
@@ -135,10 +142,15 @@ class SettingsPage(QWidget):
         try:
             if reply.error() != QNetworkReply.NoError:
                 raise OSError(reply.errorString())
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if status != 200:
+                raise OSError("HTTP {}".format(status))
             releases = json.loads(bytes(reply.readAll()).decode("utf-8"))
             if not isinstance(releases, list):
                 raise ValueError("GitHub 返回了无效的发布信息")
             self._release = find_update(releases)
+            logging.info("Update check success source=%s latest=%s", self._check_source,
+                         self._release.tag if self._release else "current")
             if self._release is None:
                 self.status.setText("已是当前通道的最新版本")
                 self.release_label.hide()
@@ -162,8 +174,20 @@ class SettingsPage(QWidget):
                 if has_delta and self._automatic:
                     self.download_update()
         except (OSError, ValueError, TypeError, KeyError) as exc:
-            logging.warning("Update check failed: %s", exc)
-            self.status.setText("检查失败，请确认网络连接后重试。")
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            logging.warning("Update check failed source=%s http=%s error=%s recent_actions=%s",
+                            self._check_source, status, exc, recent_actions())
+            if self._check_source == "static_feed":
+                record_action("update.check_fallback")
+                self._start_check(RELEASES_API, "github_api")
+                return
+            remaining = bytes(reply.rawHeader(b"X-RateLimit-Remaining"))
+            if status in (403, 429) and remaining == b"0":
+                self.status.setText("GitHub 检查请求受限，请稍后再试。")
+            elif status:
+                self.status.setText("检查失败（HTTP {}），请稍后重试。".format(status))
+            else:
+                self.status.setText("检查失败，请确认网络连接后重试。")
         finally:
             reply.deleteLater()
 
@@ -214,6 +238,8 @@ class SettingsPage(QWidget):
         if self._closing or self._download_reply is not None or self._release is None:
             return
         self._download_is_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url)
+        record_action("update.download", version=self._release.tag,
+                      kind="delta" if self._download_is_delta else "full")
         self.install_button.hide()
         asset_name = self._release.delta_name if self._download_is_delta else self._release.asset_name
         asset_url = self._release.delta_url if self._download_is_delta else self._release.asset_url
@@ -302,6 +328,9 @@ class SettingsPage(QWidget):
                 raise ValueError("下载文件校验失败")
             os.replace(str(self._partial), str(self._target))
             self.status.setText("下载完成：" + self._target.name)
+            logging.info("Update download verified version=%s kind=%s bytes=%s",
+                         self._release.tag, "delta" if self._download_is_delta else "full",
+                         self._target.stat().st_size)
             self.folder_button.show()
             self.install_button.setVisible(self._download_is_delta)
         except (OSError, ValueError) as exc:
@@ -318,6 +347,7 @@ class SettingsPage(QWidget):
     def install_update(self):
         if not self._download_is_delta or self._target is None or not self._target.is_file():
             return
+        record_action("update.install", from_version=CLIENT_VERSION, to_version=self._release.tag)
         script = Path(getattr(sys, "_MEIPASS", "")) / "updater" / "apply_update.ps1"
         if not script.is_file():
             self.status.setText("更新程序缺失，请下载完整便携包。")
