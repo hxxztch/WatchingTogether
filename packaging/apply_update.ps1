@@ -32,7 +32,14 @@ function Safe-Target([string]$relative) {
 
 function Check-Hash([string]$path, [string]$expected) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $path" }
-    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead($path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $actual = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
     if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA256 mismatch: $path" }
 }
 
