@@ -37,6 +37,8 @@ class SettingsPage(QWidget):
         self._release = None
         self._download_is_delta = False
         self._expected_digest = ""
+        self._manifest_redirects = 0
+        self._download_redirects = 0
         self._automatic = False
         self._closing = False
 
@@ -96,6 +98,21 @@ class SettingsPage(QWidget):
         request.setTransferTimeout(timeout)
         return request
 
+    @staticmethod
+    def _redirect_target(reply, redirects):
+        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        if status not in (301, 302, 303, 307, 308):
+            return None
+        target = reply.attribute(QNetworkRequest.RedirectionTargetAttribute)
+        if not isinstance(target, QUrl) or target.isEmpty():
+            raise ValueError("GitHub 未提供下载跳转地址")
+        url = reply.url().resolved(target)
+        host = url.host().lower()
+        if (redirects >= 5 or url.scheme().lower() != "https" or
+                not (host == "github.com" or host.endswith(".githubusercontent.com"))):
+            raise ValueError("GitHub 返回了不安全的下载跳转")
+        return url
+
     def check_updates(self, automatic=False):
         if self._closing or self._check_reply is not None or self._download_reply is not None:
             return
@@ -153,6 +170,7 @@ class SettingsPage(QWidget):
     def _load_manifest(self):
         if self._manifest_reply is not None:
             self._manifest_reply.abort()
+        self._manifest_redirects = 0
         reply = self._network.get(self._request(self._release.manifest_url, 12000))
         self._manifest_reply = reply
         reply.finished.connect(lambda: self._finish_manifest(reply))
@@ -161,6 +179,21 @@ class SettingsPage(QWidget):
         if reply is not self._manifest_reply:
             reply.deleteLater()
             return
+        if not self._closing:
+            try:
+                target = self._redirect_target(reply, self._manifest_redirects)
+                if target is not None:
+                    self._manifest_redirects += 1
+                    next_reply = self._network.get(self._request(target, 12000))
+                    self._manifest_reply = next_reply
+                    next_reply.finished.connect(lambda: self._finish_manifest(next_reply))
+                    reply.deleteLater()
+                    return
+            except ValueError as exc:
+                logging.warning("Invalid update manifest redirect: %s", exc)
+                self._manifest_reply = None
+                reply.deleteLater()
+                return
         self._manifest_reply = None
         if not self._closing and reply.error() == QNetworkReply.NoError:
             try:
@@ -200,9 +233,13 @@ class SettingsPage(QWidget):
             self.status.setText("无法创建下载文件，请检查下载目录。")
             return
         self._hash = hashlib.sha256()
+        self._download_redirects = 0
         self.download_button.setEnabled(False)
         self.status.setText("正在下载 " + asset_name + "…")
-        reply = self._network.get(self._request(asset_url, 120000))
+        self._start_download_request(asset_url)
+
+    def _start_download_request(self, url):
+        reply = self._network.get(self._request(url, 120000))
         self._download_reply = reply
         reply.readyRead.connect(lambda: self._read_download(reply))
         reply.downloadProgress.connect(self._download_progress)
@@ -210,6 +247,9 @@ class SettingsPage(QWidget):
 
     def _read_download(self, reply):
         if reply is not self._download_reply or self._output is None:
+            return
+        if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) in (301, 302, 303, 307, 308):
+            reply.readAll()
             return
         try:
             data = bytes(reply.readAll())
@@ -228,6 +268,20 @@ class SettingsPage(QWidget):
             reply.deleteLater()
             return
         self._read_download(reply)
+        redirect_error = None
+        if not self._closing:
+            try:
+                target = self._redirect_target(reply, self._download_redirects)
+                if target is not None:
+                    self._output.seek(0)
+                    self._output.truncate(0)
+                    self._hash = hashlib.sha256()
+                    self._download_redirects += 1
+                    self._start_download_request(target)
+                    reply.deleteLater()
+                    return
+            except (OSError, ValueError) as exc:
+                redirect_error = exc
         self._download_reply = None
         self.download_button.setEnabled(True)
         if self._output is not None:
@@ -236,8 +290,13 @@ class SettingsPage(QWidget):
         try:
             if self._closing:
                 return
+            if redirect_error is not None:
+                raise redirect_error
             if reply.error() != QNetworkReply.NoError:
                 raise OSError(reply.errorString())
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if status != 200:
+                raise OSError("GitHub 下载失败（HTTP {}）".format(status))
             expected = self._expected_digest
             if expected and expected.startswith("sha256:") and self._hash.hexdigest() != expected[7:]:
                 raise ValueError("下载文件校验失败")
