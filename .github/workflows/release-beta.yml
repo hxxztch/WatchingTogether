@@ -74,3 +74,8 @@ jobs:
           fail_on_unmatched_files: true
           prerelease: true
           body_path: release-notes.txt
+      - name: Publish static beta update feed
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python packaging/publish_update_feed.py

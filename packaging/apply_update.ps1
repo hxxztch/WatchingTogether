@@ -9,6 +9,13 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $installRoot = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+$updateLog = Join-Path $installRoot 'crash.log'
+function Write-UpdateLog([string]$message) {
+    $line = '[{0}] INFO updater: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $message
+    try { [IO.File]::AppendAllText($updateLog, $line + [Environment]::NewLine, [Text.Encoding]::UTF8) }
+    catch { Write-Warning $line }
+}
+Write-UpdateLog "start from=$FromVersion to=$ToVersion process=$TargetProcessId"
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $tempRoot = Join-Path $tempParent ('wt-update-' + [guid]::NewGuid().ToString('N'))
 if (-not ([IO.Path]::GetFullPath($tempRoot).StartsWith($tempParent + '\', [StringComparison]::OrdinalIgnoreCase))) {
@@ -22,7 +29,7 @@ function Safe-Target([string]$relative) {
         @($relative.Split('/')) -contains '..' -or @($relative.Split('/')) -contains '.') {
         throw "Unsafe update path: $relative"
     }
-    if ($relative -in @('config.json', 'crash.log')) { throw "Protected file: $relative" }
+    if ($relative -in @('config.json', 'crash.log', 'crash.log.1', 'crash.log.2', 'crash.log.3', 'fatal.log', 'fatal.log.1')) { throw "Protected file: $relative" }
     $target = [IO.Path]::GetFullPath((Join-Path $installRoot ($relative -replace '/', '\')))
     if (-not $target.StartsWith($installRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Update path escaped the installation: $relative"
@@ -62,6 +69,7 @@ try {
     try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
     if ($manifest.schema -ne 1 -or $manifest.from_version -ne $FromVersion -or
         $manifest.to_version -ne $ToVersion) { throw 'Update version mismatch' }
+    Write-UpdateLog "manifest verified changed=$(@($manifest.files).Count) removed=$(@($manifest.removed).Count)"
     $affected = @($manifest.files) + @($manifest.removed)
     $seen = @{}
     foreach ($item in $affected) {
@@ -101,6 +109,7 @@ try {
             Remove-Item -LiteralPath $target -Force
         }
         $committed = $true
+        Write-UpdateLog 'files committed'
     } finally {
         if (-not $committed) {
             foreach ($item in $affected) {
@@ -120,6 +129,7 @@ try {
         Start-Process -FilePath $newExe -WorkingDirectory $installRoot
     }
 } catch {
+    Write-UpdateLog "failed type=$($_.Exception.GetType().Name) message=$($_.Exception.Message)"
     if (-not $NoRestart) {
         $oldExe = Safe-Target ('超时空会夜机' + $FromVersion + '.exe')
         if (Test-Path -LiteralPath $oldExe -PathType Leaf) {
@@ -134,4 +144,5 @@ try {
 } finally {
     if ($null -ne $archive) { $archive.Dispose() }
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    Write-UpdateLog 'finished'
 }

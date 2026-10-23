@@ -6,6 +6,7 @@ from app.version import CLIENT_VERSION
 
 
 RELEASES_API = "https://api.github.com/repos/hxxztch/WatchingTogether/releases?per_page=30"
+RELEASES_FEED = "https://raw.githubusercontent.com/hxxztch/WatchingTogether/update-feed/releases.json"
 RELEASES_PAGE = "https://github.com/hxxztch/WatchingTogether/releases"
 ASSET_PREFIX = "https://github.com/hxxztch/WatchingTogether/releases/download/"
 _VERSION = re.compile(r"^(beta|v)(\d+)\.(\d+)\.(\d+)$")
