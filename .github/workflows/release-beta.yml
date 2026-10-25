@@ -61,6 +61,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not build delta from $old" }
             Remove-Item -LiteralPath $oldZip
           }
+      - name: Report build diagnostics
+        if: failure()
+        shell: pwsh
+        run: python packaging/ci_diagnostics.py
       - name: Prepare release notes
         shell: pwsh
         run: |
