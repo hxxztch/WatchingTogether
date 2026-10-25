@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.version import CLIENT_VERSION
 
-for relative in ('client-check.json', 'client-build.log'):
+for relative in ('client-check.json', 'client-build.log', 'build-console.log'):
     path = ROOT / 'build' / CLIENT_VERSION / relative
     if path.is_file():
         message = path.read_text(encoding='utf-8', errors='replace')[-6000:]

@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +39,8 @@ jobs:
         shell: pwsh
         run: |
           ./packaging/fetch_cloudflared.ps1
-          python packaging/build_integrated.py build
+          New-Item -ItemType Directory -Force -Path "build/$env:GITHUB_REF_NAME" | Out-Null
+          python packaging/build_integrated.py build 2>&1 | Tee-Object -FilePath "build/$env:GITHUB_REF_NAME/build-console.log"
           if ($LASTEXITCODE -ne 0) { throw 'Portable client build failed' }
           python packaging/verify_integrated.py
           if ($LASTEXITCODE -ne 0) { throw 'Portable client verification failed' }

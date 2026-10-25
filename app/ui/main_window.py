@@ -982,7 +982,7 @@ class MainWindow(QMainWindow):
         if self._closing or not hasattr(self, '_pip'):
             return
         if self.isMinimized():
-            if self._pip.isVisible() or (self._player.is_playing and self._player.duration > 0):
+            if self._pip.isVisible() or (self._shell.pages.currentIndex() == 1 and self._player.duration > 0):
                 self._show_mini_player()
         elif self._shell.pages.currentIndex() == 1 and self._player.parentWidget() is self._pip:
             self._switch_page(1)

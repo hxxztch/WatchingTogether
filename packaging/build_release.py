@@ -8,6 +8,10 @@ import subprocess
 import sys
 import zipfile
 
+# Redirected Windows CI output may use a code page without Chinese glyphs.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(errors='backslashreplace')
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.version import CLIENT_NAME, SERVER_NAME, CLIENT_VERSION, SERVER_VERSION

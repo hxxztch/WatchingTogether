@@ -125,6 +125,13 @@ def main():
             host._pip.restore.click()
             wait(lambda: not host.isMinimized() and not host._pip.isVisible())
             assert host._player._player is backend
+            host._player.pause()
+            host.showMinimized()
+            wait(lambda: host._pip.isVisible())
+            assert not host._player.is_playing
+            host._pip.restore.click()
+            wait(lambda: not host.isMinimized() and not host._pip.isVisible())
+            host._player.play()
             print('PASS: minimize theatre opens PiP; existing PiP survives minimize; return restores same player', flush=True)
             from types import SimpleNamespace
             updater = Path(directory) / 'updater'
