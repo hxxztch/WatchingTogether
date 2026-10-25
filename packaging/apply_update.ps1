@@ -30,6 +30,7 @@ function Safe-Target([string]$relative) {
         throw "Unsafe update path: $relative"
     }
     if ($relative -in @('config.json', 'crash.log', 'crash.log.1', 'crash.log.2', 'crash.log.3', 'fatal.log', 'fatal.log.1')) { throw "Protected file: $relative" }
+    if ($relative.Split('/')[0] -ieq 'stickers') { throw "Protected user sticker path: $relative" }
     $target = [IO.Path]::GetFullPath((Join-Path $installRoot ($relative -replace '/', '\')))
     if (-not $target.StartsWith($installRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Update path escaped the installation: $relative"

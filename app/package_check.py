@@ -103,6 +103,29 @@ def run(report_path, server_url=None):
                     invitation = make_invitation('ws://127.0.0.1:' + str(service.port) + service.guest_path, host._room_code)
                     guest._on_join_room(invitation, 'package-guest')
                 wait_for(lambda: guest._room_ready)
+                if host._chat_images_supported:
+                    from PySide6.QtCore import QBuffer, QIODevice
+                    from PySide6.QtGui import QImage
+                    from app.ui.chat_images import prepare_image, EmojiPicker
+                    image = QImage(320, 240, QImage.Format_RGB32)
+                    image.fill(Qt.red)
+                    buffer = QBuffer()
+                    buffer.open(QIODevice.WriteOnly)
+                    assert image.save(buffer, 'PNG')
+                    payload = prepare_image(bytes(buffer.data()))
+                    picker = EmojiPicker(host)
+                    assert picker.list.count() >= 16
+                    picker.deleteLater()
+                    host._on_chat_image(payload)
+                    wait_for(lambda: guest._room_panel._chat_list.count() == 1)
+                    assert guest._room_panel._chat_list.item(0).data(Qt.UserRole) == 'image'
+                    guest._controls._bar_danmaku_toggle.setChecked(False)
+                    assert not guest._danmaku._labels
+                    host._on_chat_image(payload)
+                    wait_for(lambda: guest._room_panel._chat_list.count() == 2)
+                    guest._controls._bar_danmaku_toggle.setChecked(True)
+                    assert not guest._danmaku._labels
+                    result['checks'].append('bundled image decoder and emoji picker; image chat; danmaku clear/no replay')
                 controls.set_position(0, 20)
                 controls._time_editor.setText('00:04')
                 controls._submit_time()

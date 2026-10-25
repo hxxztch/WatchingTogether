@@ -65,11 +65,13 @@ class MainWindow(QMainWindow):
         self._room_panel.join_requested.connect(self._on_join_room)
         self._room_panel.leave_requested.connect(self._on_leave_room)
         self._room_panel.chat_message.connect(self._on_chat)
+        self._room_panel.emoji_requested.connect(self._choose_emoji)
         self._room_panel.refresh_connection.connect(self._reconnect_network)
         self._controls = ControlsBar()
         self._controls.bili_login_requested.connect(self._on_bili_login)
         self._controls.bili_logout_requested.connect(self._on_bili_logout)
         self._controls.danmaku_sent.connect(self._on_chat)
+        self._controls.emoji_requested.connect(self._choose_emoji)
         self._controls.play_toggled.connect(self._on_toggle_play)
         self._controls.seek_requested.connect(self._on_seek)
         self._controls.volume_changed.connect(self._player_volume)
@@ -104,6 +106,8 @@ class MainWindow(QMainWindow):
             lambda: self._room_panel.set_status("视频流加载失败，请重试或重新解析视频链接", "#f44336"))
 
         self._danmaku = DanmakuOverlay(self)
+        self._controls.danmaku_visibility_changed.connect(self._danmaku.set_enabled)
+        self._chat_images_supported = False
         self._danmaku.track(self._player)
 
         self._hotkey.connect(self._on_hotkey)
@@ -318,6 +322,7 @@ class MainWindow(QMainWindow):
         self._syncing = True
         try:
             if mtype in ("room_created", "room_joined"):
+                self._chat_images_supported = bool(msg.get('chat_images'))
                 self._room_code = msg["room"]
                 self._room_ready = True
                 self._playback_sync = PlaybackSynchronizer()
@@ -366,7 +371,8 @@ class MainWindow(QMainWindow):
                 pos = msg.get("position", 0)
                 self._player.seek(pos)
             elif mtype == "chat":
-                self._room_panel.add_chat(msg.get("from", ""), msg.get("message", "")); self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""))
+                self._room_panel.add_chat(msg.get("from", ""), msg.get("message", ""), msg.get('image'))
+                self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""), msg.get('image'))
             elif mtype == "sync_state":
                 if msg.get("room", self._room_code) == self._room_code:
                     self._apply_room_state(msg.get("state", {}))
@@ -457,6 +463,30 @@ class MainWindow(QMainWindow):
             self._network.send({"type": "chat", "message": text})
             self._room_panel.add_chat("我", text)
             self._danmaku.show_danmaku("我", text)
+
+    def _choose_emoji(self):
+        from app.ui.chat_images import EmojiPicker
+        dialog = EmojiPicker(self)
+        dialog.text_chosen.connect(self._on_chat)
+        dialog.image_chosen.connect(self._on_chat_image)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _on_chat_image(self, image):
+        if not self._room_ready:
+            QMessageBox.information(self, '发送图片', '请先加入房间并等待连接恢复。')
+            return
+        if not self._chat_images_supported:
+            QMessageBox.information(self, '发送图片', '此服务器尚不支持图片，请使用 beta0.1.3 或更新版本的房主创建房间。')
+            return
+        from app.ui.chat_images import image_pixmap
+        try:
+            image_pixmap(image)
+        except ValueError:
+            return
+        self._network.send({'type': 'chat', 'message': '[图片]', 'image': image})
+        self._room_panel.add_chat('我', '[图片]', image)
+        self._danmaku.show_danmaku('我', '[图片]', image)
 
     def _on_toggle_play(self):
         if self._player.is_playing:
@@ -817,6 +847,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if obj is self and event.type() in (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.WindowStateChange):
+            if event.type() == QEvent.WindowStateChange:
+                QTimer.singleShot(0, self._sync_minimized_player)
             QTimer.singleShot(0, self._position_controls)
         if event.type() == QEvent.KeyPress:
             # Navigation on Home must not issue playback commands to the room.
@@ -903,7 +935,10 @@ class MainWindow(QMainWindow):
         self._controls.layout().setContentsMargins(margin, 10, margin, 12)
         for button in (self._controls._play_btn, self._controls._stop_btn,
                        self._controls._vol_btn, self._controls._fs_btn):
-            button.setFixedWidth(32 if compact else 38)
+            button.setFixedWidth(28 if compact else 38)
+        self._controls._bar_danmaku_input.setMinimumWidth(56 if compact else 80)
+        self._controls._seek_bar.setMinimumWidth(40 if compact else 60)
+        self._controls._bar_danmaku_btn.setFixedWidth(32 if compact else 46)
         ch = self._controls.sizeHint().height()
         self._controls.setGeometry(origin.x(), origin.y() + self._player.height() - ch,
                                    self._player.width(), ch)
@@ -930,19 +965,37 @@ class MainWindow(QMainWindow):
                 self._controls._seek_bar.isSliderDown() or self._controls._vol_slider_v.isSliderDown() or
                 self._controls._vol_popup.isVisible())
 
+    def _show_mini_player(self):
+        if self._player.parentWidget() is not self._pip:
+            self._video_layout.removeWidget(self._player)
+            self._pip.body.insertWidget(0, self._player, 1)
+            self._player.show()
+            screen = self.screen().availableGeometry()
+            self._pip.move(screen.right() - self._pip.width() - 24,
+                           screen.bottom() - self._pip.height() - 24)
+        self._controls.hide()
+        self._controls._vol_popup.hide()
+        self._pip.show()
+        self._danmaku.track(self._player)
+
+    def _sync_minimized_player(self):
+        if self._closing or not hasattr(self, '_pip'):
+            return
+        if self.isMinimized():
+            if self._pip.isVisible() or (self._player.is_playing and self._player.duration > 0):
+                self._show_mini_player()
+        elif self._shell.pages.currentIndex() == 1 and self._player.parentWidget() is self._pip:
+            self._switch_page(1)
+
     def _switch_page(self, index):
+        if index == 1 and self.isMinimized():
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
         if index != 1 and self.isFullScreen():
             self._exit_fullscreen()
         if index != 1 and self._player.is_playing and self._player.duration > 0:
-            if not self._pip.isVisible():
-                self._video_layout.removeWidget(self._player)
-                self._pip.body.insertWidget(0, self._player, 1)
-                self._player.show()
-                self._controls._vol_popup.hide()
-                screen = self.screen().availableGeometry()
-                self._pip.move(screen.right() - self._pip.width() - 24,
-                               screen.bottom() - self._pip.height() - 24)
-                self._pip.show()
+            self._show_mini_player()
         elif index == 1 and self._player.parentWidget() is self._pip:
             self._pip.body.removeWidget(self._player)
             self._video_layout.insertWidget(0, self._player, 1)
@@ -1046,6 +1099,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().removeEventFilter(self)
         self._vid_info_timer.stop()
         self._danmaku.close()
+        self._danmaku._timer.stop()
         self._player.stop()
         self._network.stop()
         super().closeEvent(event)

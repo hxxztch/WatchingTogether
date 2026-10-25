@@ -25,6 +25,8 @@ def package_files(archive):
         if any(part in ("", ".", "..") for part in relative.split("/")):
             raise ValueError("Unsafe package path: " + item.filename)
         roots.add(root)
+        if relative.split('/')[0].lower() == 'stickers':
+            continue
         if relative in files:
             raise ValueError("Duplicate package path: " + relative)
         if relative not in EXCLUDED:

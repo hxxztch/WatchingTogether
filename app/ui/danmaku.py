@@ -9,7 +9,9 @@ class DanmakuOverlay(QWidget):
     """Transparent floating window for danmaku, stays on top of the player."""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        # Owned tool windows are hidden with their owner on Windows. This
+        # overlay also follows the independent mini player while main is minimized.
+        super().__init__(None)
         self.setWindowFlags(
             
             Qt.FramelessWindowHint |
@@ -28,6 +30,16 @@ class DanmakuOverlay(QWidget):
         ]
         self._lane = 0
         self._target = None  # QWidget whose position we track
+        self.enabled = True
+
+    def set_enabled(self, enabled):
+        self.enabled = bool(enabled)
+        if not self.enabled:
+            for item in self._labels:
+                item['label'].hide()
+                item['label'].deleteLater()
+            self._labels.clear()
+            self.hide()
 
     def track(self, widget):
         """Track this widget's position and size on screen."""
@@ -35,7 +47,7 @@ class DanmakuOverlay(QWidget):
         self._sync_position()
 
     def _sync_position(self):
-        if self._target and self._target.isVisible() and not self._target.window().isMinimized():
+        if self.enabled and self._target and self._target.isVisible() and not self._target.window().isMinimized():
             pos = self._target.mapToGlobal(self._target.rect().topLeft())
             self.setGeometry(pos.x(), pos.y(),
                              self._target.width(), self._target.height())
@@ -44,8 +56,8 @@ class DanmakuOverlay(QWidget):
         else:
             self.hide()
 
-    def show_danmaku(self, sender: str, text: str):
-        if not self._target or len(self._labels) >= 40:
+    def show_danmaku(self, sender: str, text: str, image=None):
+        if not self.enabled or not self._target or len(self._labels) >= 40:
             return
         self._sync_position()
 
@@ -58,6 +70,13 @@ class DanmakuOverlay(QWidget):
         )
         font = QFont("Microsoft YaHei", 14, QFont.Bold)
         label.setFont(font)
+        if image:
+            from app.ui.chat_images import image_pixmap
+            try:
+                label.setPixmap(image_pixmap(image, 64))
+            except ValueError:
+                label.deleteLater()
+                return
         label.adjustSize()
 
         w = self.width()
@@ -67,7 +86,7 @@ class DanmakuOverlay(QWidget):
         if h < 100:
             h = 600
 
-        y = 10 + self._lane * 36
+        y = 10 + self._lane * 72
         self._lane = (self._lane + 1) % 4
         if y + label.height() > h - 60:
             y = max(10, h - label.height() - 60)

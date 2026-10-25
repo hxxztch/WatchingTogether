@@ -48,6 +48,16 @@ class ControlsBar(QWidget):
     page_changed = Signal(int)
 
     danmaku_sent = Signal(str)
+    danmaku_visibility_changed = Signal(bool)
+    emoji_requested = Signal()
+
+    def set_danmaku_enabled(self, enabled):
+        for button in (self._danmaku_toggle, self._bar_danmaku_toggle):
+            button.blockSignals(True)
+            button.setChecked(enabled)
+            button.setToolTip('显示弹幕：已开启' if enabled else '显示弹幕：已关闭')
+            button.blockSignals(False)
+        self.danmaku_visibility_changed.emit(enabled)
 
     bili_login_requested = Signal()
     bili_logout_requested = Signal()

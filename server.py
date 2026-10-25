@@ -253,7 +253,7 @@ class Server:
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
                                    "room": room.code, "name": member.name,
                                    "token": member.token, "protocol": 2,
-                                   "chat_seq": cursor,
+                                   "chat_seq": cursor, "chat_images": True,
                                    "resumed": mtype == "resume_room", "members": room.member_names,
                                    "state": room.snapshot()})
                         if mtype == "resume_room":
@@ -288,9 +288,15 @@ class Server:
                         continue
                     elif mtype == "chat":
                         message = str(msg.get("message", ""))[:4000]
+                        picture = msg.get('image')
+                        if picture is not None:
+                            from app.chat_media import image_bytes
+                            image_bytes(picture)
                         room.chat_seq += 1
                         event = {"type": "chat", "from": member.name,
                                  "message": message, "id": message_id, "seq": room.chat_seq}
+                        if picture is not None:
+                            event['image'] = picture
                         room.history.append((member.token, event))
                         self.broadcast(room, event, exclude=member)
                     elif mtype == "load":

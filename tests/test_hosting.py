@@ -28,6 +28,32 @@ async def send(ws, kind, **kw):
 
 
 class HostingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_image_chat_validation_dedup_and_resume(self):
+        import base64
+        # A standard 1x1 PNG, no GUI required on the server.
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhWQAAAAASUVORK5CYII='
+        owner = await self.socket(self.host.host_path)
+        await send(owner, 'create_room', name='owner', protocol=2)
+        room = await receive(owner, 'room_created')
+        self.assertTrue(room['chat_images'])
+        guest = await self.socket(self.host.guest_path)
+        await send(guest, 'join_room', name='guest', room=room['room'], protocol=2)
+        joined = await receive(guest, 'room_joined')
+        await send(owner, 'chat', message='[image]', image=image, id='picture')
+        event = await receive(guest, 'chat')
+        self.assertEqual(event['image'], image)
+        await send(owner, 'chat', message='[image]', image=image, id='picture')
+        await receive(owner, 'ack')
+        await send(owner, 'chat', message='bad', image='X' * 40000, id='too-big')
+        await receive(owner, 'error')
+        await guest.close()
+        resumed = await self.socket(self.host.guest_path)
+        await send(resumed, 'resume_room', room=room['room'], token=joined['token'], chat_seq=0)
+        await receive(resumed, 'room_joined')
+        replay = await receive(resumed, 'chat')
+        self.assertEqual(replay['seq'], event['seq'])
+        self.assertEqual(replay['image'], image)
+
     async def asyncSetUp(self):
         self.host = EmbeddedHost()
         self.host.start()

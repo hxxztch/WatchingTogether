@@ -28,6 +28,11 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 9. 影厅右侧「导入字幕」支持 SRT / ASS / SSA / SUB / VTT / TXT，亦可拖入。
    「撤销字幕」移除最近手动导入的外挂字幕，不删除原文件、不影响内嵌字幕。
 10. 创建公共通道时显示转圈提示并锁定其他操作，可用提示框内「取消」中止。
+11. 弹幕框旁的「显示弹幕」/「幕」开关只影响本机显示；关闭立即清空，再开启只显示新收到的弹幕，聊天室仍保留消息。
+12. 「表情与图片」/「+」可发送内置emoji和图片；支持自定义表情及导入图片文件夹、ZIP图片包。
+    PNG/JPG/WebP/BMP/GIF均可导入，GIF仅显示首帧。发送前自动压缩；单图原文件最多8MB，尺寸最多1600万像素。
+    表情保存在EXE旁stickers文件夹，升级时保留；重新分发前请移除个人表情库。图片消息需要新版房主/服务器支持。
+13. 播放中最小化主窗口会弹出小窗，已有小窗不会随主窗口最小化；点小窗「返回影厅」恢复主窗口。
 
 公共通道使用 Cloudflare Quick Tunnel，属于无可用性保证的临时服务。
 聊天和控制经第三方通道转发（传输加密，非端到端加密）；不传视频、不建立系统虚拟网卡。
@@ -45,9 +50,6 @@ if __name__ == '__main__':
     if args.action == 'build':
         release.build(components=['client'])
         package = release.DIST / release.CLIENT_NAME
-        local_report = release.ROOT / '一体化方案与验收.txt'
-        if local_report.is_file():
-            shutil.copy2(local_report, package / '发行检查.txt')
         with (package / '第三方依赖说明.txt').open('a', encoding='utf-8') as notices:
             notices.write('\ncloudflared 2026.10.1 (Apache-2.0): https://github.com/cloudflare/cloudflared\n'
                           'License: _internal/THIRD-PARTY-CLOUDFLARED.txt\n')

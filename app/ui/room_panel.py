@@ -1,7 +1,7 @@
 ﻿"""Room panel UI - create and join watching rooms."""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QLabel, QListWidget, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication,
+    QLabel, QListWidget, QListWidgetItem, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -23,6 +23,7 @@ class RoomPanel(QWidget):
     join_requested = Signal(str, str)
     leave_requested = Signal()
     chat_message = Signal(str)
+    emoji_requested = Signal()
     refresh_connection = Signal(str)
     cancel_requested = Signal()
 
@@ -193,6 +194,9 @@ class RoomPanel(QWidget):
         self._chat_input.setPlaceholderText("输入消息...")
         self._chat_input.returnPressed.connect(self._on_send_chat)
         chat_row.addWidget(self._chat_input)
+        emoji_button = QPushButton('表情')
+        emoji_button.clicked.connect(self.emoji_requested)
+        chat_row.addWidget(emoji_button)
         send_btn = QPushButton("发送")
         send_btn.clicked.connect(self._on_send_chat)
         send_btn.setObjectName("send_btn")
@@ -375,8 +379,34 @@ class RoomPanel(QWidget):
         self._latency = milliseconds
         self._update_member_summary()
 
-    def add_chat(self, sender: str, msg: str):
-        self._chat_list.addItem(f"[{sender}] {msg}")
+    def add_chat(self, sender: str, msg: str, image=None):
+        if image:
+            from app.ui.chat_images import image_pixmap
+            try:
+                pixmap = image_pixmap(image)
+            except ValueError:
+                self._chat_list.addItem(f'[{sender}] [无效图片]')
+            else:
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, 'image')
+                widget = QWidget()
+                layout = QVBoxLayout(widget)
+                layout.setContentsMargins(4, 4, 4, 4)
+                title = QLabel(f'[{sender}] {msg}')
+                title.setTextFormat(Qt.PlainText)
+                title.setWordWrap(True)
+                layout.addWidget(title)
+                picture = QLabel()
+                picture.setPixmap(pixmap)
+                layout.addWidget(picture)
+                item.setSizeHint(widget.sizeHint())
+                self._chat_list.addItem(item)
+                self._chat_list.setItemWidget(item, widget)
+                images = [i for i in range(self._chat_list.count()) if self._chat_list.item(i).data(Qt.UserRole) == 'image']
+                if len(images) > 100:
+                    self._chat_list.takeItem(images[0])
+        else:
+            self._chat_list.addItem(f"[{sender}] {msg}")
         while self._chat_list.count() > 1000:
             self._chat_list.takeItem(0)
         self._chat_list.scrollToBottom()

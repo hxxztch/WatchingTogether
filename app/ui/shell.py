@@ -401,7 +401,7 @@ class MiniPlayer(QWidget):
     return_requested = Signal()
 
     def __init__(self, owner):
-        super().__init__(owner, Qt.Window | Qt.WindowStaysOnTopHint)
+        super().__init__(None, Qt.Window | Qt.WindowStaysOnTopHint)
         self.owner = owner
         self.setWindowTitle("超时空会夜机 · 小窗播放")
         self.setWindowIcon(owner.windowIcon())

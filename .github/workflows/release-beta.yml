@@ -37,8 +37,11 @@ jobs:
         run: |
           ./packaging/fetch_cloudflared.ps1
           python packaging/build_integrated.py build
+          if ($LASTEXITCODE -ne 0) { throw 'Portable client build failed' }
           python packaging/verify_integrated.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable client verification failed' }
           python packaging/build_integrated.py archive --output dist/beta-archives
+          if ($LASTEXITCODE -ne 0) { throw 'Portable archive failed' }
       - name: Build deltas from previous beta releases
         shell: pwsh
         env:
