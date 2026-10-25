@@ -126,6 +126,25 @@ def main():
             wait(lambda: not host.isMinimized() and not host._pip.isVisible())
             assert host._player._player is backend
             print('PASS: minimize theatre opens PiP; existing PiP survives minimize; return restores same player', flush=True)
+            from types import SimpleNamespace
+            updater = Path(directory) / 'updater'
+            updater.mkdir()
+            (updater / 'apply_update.ps1').write_text('# mocked updater')
+            delta = Path(directory) / 'test.delta.zip'
+            delta.write_bytes(b'test')
+            settings = host._shell.settings
+            settings._download_is_delta = True
+            settings._target = delta
+            settings._release = SimpleNamespace(tag='beta0.1.4')
+            host._switch_page(0)
+            wait(lambda: host._pip.isVisible())
+            with patch.object(sys, '_MEIPASS', directory, create=True), \
+                    patch('app.ui.settings.subprocess.Popen') as launch, \
+                    patch.object(QApplication, 'quit') as quit_app:
+                settings.install_update()
+                assert launch.call_count == quit_app.call_count == 1
+                assert host._closing and not host._pip.isVisible() and host._rooms.host is None
+            print('PASS: update shutdown closes active PiP and room before quitting', flush=True)
         finally:
             for window in (host, guest):
                 window.close()

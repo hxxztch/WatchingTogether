@@ -366,7 +366,10 @@ class SettingsPage(QWidget):
             logging.warning("Could not start updater: %s", exc)
             self.status.setText("无法启动更新程序，请手动下载完整便携包。")
             return
-        QApplication.closeAllWindows()
+        # MiniPlayer's close button returns to the theatre; closeAllWindows can
+        # stop at that ignored close event and leave the updater waiting forever.
+        self.window().close()
+        QApplication.quit()
 
     def open_release(self):
         QDesktopServices.openUrl(QUrl(self._release.page_url if self._release else RELEASES_PAGE))
