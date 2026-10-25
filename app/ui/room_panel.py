@@ -1,7 +1,7 @@
 ﻿"""Room panel UI - create and join watching rooms."""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QLabel, QListWidget, QListWidgetItem, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication,
+    QLabel, QListWidget, QListWidgetItem, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication, QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -29,7 +29,7 @@ class RoomPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(280)
+        self.setMinimumWidth(260)
         self._latency = None
         self._setup_ui()
         self._in_room = False
@@ -38,7 +38,7 @@ class RoomPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setContentsMargins(18, 10, 18, 10)
         layout.setSpacing(8)
         self.management = QWidget()
         self.management.setObjectName('roomCard')
@@ -58,7 +58,7 @@ class RoomPanel(QWidget):
         self.mode.addItems(['异地联机 · 公共通道（试用）', '同一局域网 · 直接连接', '原服务器 / 外部内网穿透'])
         management.addWidget(self.mode)
 
-        title = QLabel("成员与聊天")
+        title = QLabel("聊天室")
         title.setAlignment(Qt.AlignLeft)
         title.setObjectName("panel_title")
         layout.addWidget(title)
@@ -71,7 +71,7 @@ class RoomPanel(QWidget):
         connection.setContentsMargins(0, 0, 0, 0)
         connection.setSpacing(8)
         self._connection_toggle.toggled.connect(self._connection_body.setVisible)
-        management.addWidget(self._connection_toggle)
+        management.addWidget(self._connection_toggle, alignment=Qt.AlignLeft)
         management.addWidget(self._connection_body)
         server_label = QLabel("服务器:")
         connection.addWidget(server_label)
@@ -88,9 +88,7 @@ class RoomPanel(QWidget):
         refresh_btn = QPushButton("刷新连接")
         refresh_btn.clicked.connect(self._on_refresh_clicked)
         refresh_btn.setObjectName("refresh_btn")
-        connection.addWidget(refresh_btn)
-
-        layout.addSpacing(4)
+        connection.addWidget(refresh_btn, alignment=Qt.AlignLeft)
 
         self._stack = QStackedWidget()
 
@@ -102,7 +100,7 @@ class RoomPanel(QWidget):
         create_btn = QPushButton("创建房间")
         create_btn.clicked.connect(self._on_create)
         create_btn.setObjectName("create_btn")
-        nr_layout.addWidget(create_btn)
+        nr_layout.addWidget(create_btn, alignment=Qt.AlignLeft)
         nr_layout.addWidget(QLabel("-- 或 --"))
         join_row = QHBoxLayout()
         self._room_input = QLineEdit()
@@ -148,14 +146,14 @@ class RoomPanel(QWidget):
         self.copy_invitation = QPushButton('复制邀请链接')
         self.copy_invitation.setEnabled(False)
         self.copy_invitation.clicked.connect(lambda: QApplication.clipboard().setText(self.invitation.text()))
-        management.addWidget(self.copy_invitation)
+        management.addWidget(self.copy_invitation, alignment=Qt.AlignLeft)
         self.tunnel_status = QLabel()
         self.tunnel_status.setWordWrap(True)
         self.tunnel_status.setTextFormat(Qt.PlainText)
         management.addWidget(self.tunnel_status)
         self.cancel_button = QPushButton('离开房间')
         self.cancel_button.clicked.connect(self.cancel_requested)
-        members_layout.addWidget(self.cancel_button)
+        members_layout.addWidget(self.cancel_button, alignment=Qt.AlignLeft)
         self.management_status = QLabel('尚未加入房间')
         self.management_status.setWordWrap(True)
         self.management_status.setTextFormat(Qt.PlainText)
@@ -166,28 +164,17 @@ class RoomPanel(QWidget):
 
         in_room = QWidget()
         ir_layout = QVBoxLayout(in_room)
-        ir_layout.setContentsMargins(0, 12, 0, 0)
+        ir_layout.setContentsMargins(0, 0, 0, 0)
         ir_layout.setSpacing(8)
-        self._room_label = QLabel()
-        self._room_label.setObjectName("room_label")
-        ir_layout.addWidget(self._room_label)
-        ir_layout.addWidget(QLabel("成员:"))
-        self._member_list = QListWidget()
-        self._member_list.setWordWrap(True)
-        self._member_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._member_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._member_list.setMaximumHeight(80)
-        ir_layout.addWidget(self._member_list)
-        leave_btn = QPushButton("离开房间")
-        leave_btn.clicked.connect(self._on_leave)
-        leave_btn.setObjectName("leave_btn")
-        ir_layout.addWidget(leave_btn)
-        ir_layout.addWidget(QLabel("聊天:"))
+        self._member_list = QListWidget(self)
+        self._member_list.hide()  # Shared membership model for Rooms and the details dialog.
         self._chat_list = QListWidget()
+        self._chat_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self._chat_list.setWordWrap(True)
         self._chat_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._chat_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        ir_layout.addWidget(self._chat_list)
+        self._chat_list.setMinimumHeight(120)
+        ir_layout.addWidget(self._chat_list, 1)
         chat_row = QHBoxLayout()
         self._chat_input = QLineEdit()
         self._chat_input.setMaxLength(4000)
@@ -345,7 +332,6 @@ class RoomPanel(QWidget):
             self.set_invitation('')
         if in_room:
             self._stack.setCurrentIndex(1)
-            self._room_label.setText(f"Room {room_code}")
             self.update_members(members or [])
         else:
             self._stack.setCurrentIndex(0)

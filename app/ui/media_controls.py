@@ -1,10 +1,10 @@
 """Vector media buttons and the right-hand video information card."""
 from functools import lru_cache
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF, QTimer
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QPolygonF
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QPolygonF, QFont
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QSlider, QLineEdit, QStackedWidget,
-    QComboBox, QMenu, QHBoxLayout, QVBoxLayout, QSizePolicy,
+    QComboBox, QMenu, QHBoxLayout, QVBoxLayout, QSizePolicy, QLayout,
 )
 
 
@@ -42,6 +42,25 @@ def media_icon(name):
             painter.drawArc(QRectF(10, 8, 8, 8), -50 * 16, 100 * 16)
             if name == 'volume':
                 painter.drawArc(QRectF(7, 4, 15, 16), -50 * 16, 100 * 16)
+    elif name.startswith('danmaku-'):
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(QRectF(3, 5, 17, 15), 3, 3)
+        painter.drawLine(8, 2, 11, 5)
+        painter.drawLine(16, 2, 13, 5)
+        painter.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
+        painter.drawText(QRectF(4, 5, 15, 14), Qt.AlignCenter, '弹')
+        painter.setBrush(QColor('#ffffff'))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(13, 13, 11, 11))
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor('#38a6cc' if name == 'danmaku-on' else '#707b86'), 1.7,
+                            Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        if name == 'danmaku-on':
+            painter.drawPolyline(QPolygonF([QPointF(15, 18), QPointF(18, 21), QPointF(22, 16)]))
+        else:
+            painter.drawEllipse(QRectF(14.5, 14.5, 8, 8))
+            painter.drawLine(QPointF(17, 17), QPointF(20, 20))
+            painter.drawLine(QPointF(20, 17), QPointF(17, 20))
     elif name == 'fullscreen':
         for x, y, dx, dy in ((5, 5, 5, 5), (19, 5, -5, 5), (5, 19, 5, -5), (19, 19, -5, -5)):
             painter.drawLine(x, y, x + dx, y)
@@ -134,16 +153,10 @@ def build_controls(self, menu_style):
     self._bar_danmaku_btn.setStyleSheet(BUTTON_STYLE + 'QPushButton { color: #34404a; }')
     self._bar_danmaku_btn.clicked.connect(lambda: self._send_danmaku(self._bar_danmaku_input))
     layout.addWidget(self._bar_danmaku_btn)
-    self._bar_emoji_btn = QPushButton('+')
-    self._bar_emoji_btn.setToolTip('表情与图片')
-    self._bar_emoji_btn.setFixedSize(26, 38)
-    self._bar_emoji_btn.setStyleSheet(BUTTON_STYLE + 'QPushButton { color: #34404a; }')
-    self._bar_emoji_btn.clicked.connect(self.emoji_requested)
-    layout.addWidget(self._bar_emoji_btn)
-    self._bar_danmaku_toggle = QPushButton('幕')
+    self._bar_danmaku_toggle = icon_button('danmaku-on', '显示弹幕：已开启')
     self._bar_danmaku_toggle.setCheckable(True)
     self._bar_danmaku_toggle.setChecked(True)
-    self._bar_danmaku_toggle.setFixedSize(26, 38)
+    self._bar_danmaku_toggle.setFixedSize(32, 38)
     self._bar_danmaku_toggle.setStyleSheet(BUTTON_STYLE + 'QPushButton { color: #889099; } QPushButton:checked { color: #34404a; border-color: #bf8964; }')
     self._bar_danmaku_toggle.toggled.connect(self.set_danmaku_enabled)
     layout.addWidget(self._bar_danmaku_toggle)
@@ -176,9 +189,11 @@ def build_controls(self, menu_style):
     # A separate panel is installed above the room/chat controls by MainWindow.
     self.media_panel = QWidget()
     self.media_panel.setObjectName('mediaInfo')
+    self.media_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
     panel = QVBoxLayout(self.media_panel)
-    panel.setContentsMargins(18, 18, 18, 14)
-    panel.setSpacing(10)
+    panel.setSizeConstraint(QLayout.SetMinimumSize)
+    panel.setContentsMargins(18, 14, 18, 10)
+    panel.setSpacing(8)
     self._media_source = QLabel('当前影片')
     self._media_source.setObjectName('eyebrow')
     panel.addWidget(self._media_source)
@@ -207,6 +222,12 @@ def build_controls(self, menu_style):
     self._open_btn.setMenu(open_menu)
     actions.addWidget(self._open_btn)
     panel.addLayout(actions)
+    self.media_details = QWidget()
+    panel.addWidget(self.media_details)
+    panel = QVBoxLayout(self.media_details)
+    panel.setSizeConstraint(QLayout.SetMinimumSize)
+    panel.setContentsMargins(0, 0, 0, 0)
+    panel.setSpacing(8)
     self._bili_btn = QPushButton('登录 bilibili')
     self._bili_btn.clicked.connect(self._on_bili_menu)
     panel.addWidget(self._bili_btn)
@@ -236,24 +257,4 @@ def build_controls(self, menu_style):
     subtitle_hint.setObjectName('subtle')
     subtitle_hint.setWordWrap(True)
     panel.addWidget(subtitle_hint)
-    chat_row = QHBoxLayout()
-    self._danmaku_input = QLineEdit()
-    self._danmaku_input.setMaxLength(4000)
-    self._danmaku_input.setPlaceholderText('发个弹幕…')
-    self._danmaku_input.returnPressed.connect(self._on_danmaku)
-    chat_row.addWidget(self._danmaku_input, 1)
-    self._danmaku_btn = QPushButton('发送')
-    self._danmaku_btn.clicked.connect(self._on_danmaku)
-    chat_row.addWidget(self._danmaku_btn)
-    panel.addLayout(chat_row)
-    extra = QHBoxLayout()
-    emoji = QPushButton('表情与图片')
-    emoji.clicked.connect(self.emoji_requested)
-    extra.addWidget(emoji)
-    self._danmaku_toggle = QPushButton('显示弹幕')
-    self._danmaku_toggle.setCheckable(True)
-    self._danmaku_toggle.setChecked(True)
-    self._danmaku_toggle.toggled.connect(self.set_danmaku_enabled)
-    extra.addWidget(self._danmaku_toggle)
-    panel.addLayout(extra)
     self.set_danmaku_enabled(True)

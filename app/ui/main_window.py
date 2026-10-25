@@ -2,7 +2,7 @@
 import os as _os, sys, logging, subprocess, shutil, re, json, urllib.request
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
-    QApplication, QLabel, QPushButton, QScrollArea, QFileDialog,
+    QApplication, QLabel, QPushButton, QFileDialog,
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRect
 import base64
@@ -56,6 +56,8 @@ class MainWindow(QMainWindow):
         self._my_name = ""
         self._syncing = False
 
+        from app.ui.text_menus import install_edit_menus
+        install_edit_menus()
         self._room_panel = RoomPanel()
         from app.room_controller import RoomController
         self._rooms = RoomController(self)
@@ -71,7 +73,6 @@ class MainWindow(QMainWindow):
         self._controls.bili_login_requested.connect(self._on_bili_login)
         self._controls.bili_logout_requested.connect(self._on_bili_logout)
         self._controls.danmaku_sent.connect(self._on_chat)
-        self._controls.emoji_requested.connect(self._choose_emoji)
         self._controls.play_toggled.connect(self._on_toggle_play)
         self._controls.seek_requested.connect(self._on_seek)
         self._controls.volume_changed.connect(self._player_volume)
@@ -121,20 +122,23 @@ class MainWindow(QMainWindow):
         left.setObjectName("roomCard")
         l2 = QVBoxLayout(left)
         l2.setContentsMargins(0, 0, 0, 0)
-        self._right_scroll = QScrollArea()
-        self._right_scroll.setWidgetResizable(True)
-        self._right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._right_scroll.setStyleSheet('QScrollArea { border: none; background: transparent; }')
         side_content = QWidget()
+        self._right_content = side_content
         side_content.setObjectName('sideContent')
         side_content.setStyleSheet('#sideContent { background: #fff; }')
         side_layout = QVBoxLayout(side_content)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(0)
         side_layout.addWidget(self._controls.media_panel)
+        self._media_fold = QPushButton('收起视频功能  ▴')
+        self._media_fold.setCheckable(True)
+        self._media_fold.setToolTip('收起登录、音轨、分 P 和字幕功能，为聊天腾出空间')
+        self._media_fold.toggled.connect(self._fold_media_details)
+        side_layout.addWidget(self._media_fold)
         side_layout.addWidget(self._room_panel, 1)
-        self._right_scroll.setWidget(side_content)
-        l2.addWidget(self._right_scroll)
+        # Only chat history scrolls. An outer scroll area uses the wrapped
+        # labels' preferred height and pushes the chat composer off-screen.
+        l2.addWidget(side_content)
         left.setFixedWidth(300)
 
         right = QWidget()
@@ -464,10 +468,18 @@ class MainWindow(QMainWindow):
             self._room_panel.add_chat("我", text)
             self._danmaku.show_danmaku("我", text)
 
+    def _fold_media_details(self, collapsed):
+        self._controls.media_details.setVisible(not collapsed)
+        self._media_fold.setText('展开视频功能  ▾' if collapsed else '收起视频功能  ▴')
+
+    def _insert_chat_emoji(self, text):
+        self._room_panel._chat_input.insert(text)
+        self._room_panel._chat_input.setFocus()
+
     def _choose_emoji(self):
         from app.ui.chat_images import EmojiPicker
         dialog = EmojiPicker(self)
-        dialog.text_chosen.connect(self._on_chat)
+        dialog.text_chosen.connect(self._insert_chat_emoji)
         dialog.image_chosen.connect(self._on_chat_image)
         dialog.exec()
         dialog.deleteLater()
@@ -1086,6 +1098,7 @@ class MainWindow(QMainWindow):
         record_action("client.close")
         self._closing = True
         self._shell.settings.stop()
+        self._shell.sticker_manager.shutdown()
         self._rooms.cancel()
         self._shell.timer.stop()
         self._pip.timer.stop()

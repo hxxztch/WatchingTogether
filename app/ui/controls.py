@@ -49,14 +49,15 @@ class ControlsBar(QWidget):
 
     danmaku_sent = Signal(str)
     danmaku_visibility_changed = Signal(bool)
-    emoji_requested = Signal()
 
     def set_danmaku_enabled(self, enabled):
-        for button in (self._danmaku_toggle, self._bar_danmaku_toggle):
-            button.blockSignals(True)
-            button.setChecked(enabled)
-            button.setToolTip('显示弹幕：已开启' if enabled else '显示弹幕：已关闭')
-            button.blockSignals(False)
+        button = self._bar_danmaku_toggle
+        button.blockSignals(True)
+        button.setChecked(enabled)
+        button.setToolTip('显示弹幕：已开启' if enabled else '显示弹幕：已关闭')
+        button.setAccessibleName(button.toolTip())
+        button.setIcon(media_icon('danmaku-on' if enabled else 'danmaku-off'))
+        button.blockSignals(False)
         self.danmaku_visibility_changed.emit(enabled)
 
     bili_login_requested = Signal()
@@ -215,9 +216,6 @@ class ControlsBar(QWidget):
         if dlg.exec() == QDialog.Accepted and url_input.text().strip():
             self.url_submitted.emit(url_input.text().strip())
 
-
-    def _on_danmaku(self):
-        self._send_danmaku(self._danmaku_input)
 
     def _send_danmaku(self, field):
         msg = field.text().strip()

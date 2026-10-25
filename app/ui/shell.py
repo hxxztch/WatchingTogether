@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QSize, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QStackedWidget, QScrollArea, QSizePolicy, QProgressBar,
+    QHBoxLayout, QGridLayout, QStackedWidget, QScrollArea, QSizePolicy, QProgressBar, QDialog, QListView,
 )
 from app.version import CLIENT_VERSION, SERVER_VERSION
 
@@ -194,14 +194,26 @@ class DesktopShell(QWidget):
         heading.addStretch()
         self.theatre_status = label("独自观影也很好", "badge")
         heading.addWidget(self.theatre_status)
+        self.members_details = QPushButton('详情')
+        self.members_details.setToolTip('查看当前房间成员')
+        self.members_details.clicked.connect(self.show_members)
+        heading.addWidget(self.members_details)
         theatre_layout.addWidget(self.theatre_header)
         theatre_layout.addWidget(theatre, 1)
         self.pages.addWidget(theatre_page)
         rooms = QScrollArea()
         rooms.setWidgetResizable(True)
         room_page = QWidget()
-        room_layout = QVBoxLayout(room_page)
-        room_layout.setContentsMargins(24, 24, 24, 24)
+        room_columns = QHBoxLayout(room_page)
+        room_columns.setContentsMargins(24, 24, 24, 24)
+        room_columns.addStretch()
+        room_cards = QWidget()
+        room_cards.setMaximumWidth(840)
+        room_columns.addWidget(room_cards, 1)
+        room_columns.addStretch()
+        room_layout = QVBoxLayout(room_cards)
+        room_layout.setContentsMargins(0, 0, 0, 0)
+        room_layout.setSpacing(18)
         room_layout.addWidget(owner._room_panel.management, 0, Qt.AlignTop)
         room_layout.addWidget(owner._room_panel.members_card, 0, Qt.AlignTop)
         room_layout.addStretch()
@@ -215,6 +227,9 @@ class DesktopShell(QWidget):
         profile_layout = QVBoxLayout(profile_page)
         profile_layout.setContentsMargins(24, 24, 24, 24)
         profile_layout.addWidget(self.profile, 0, Qt.AlignTop)
+        from app.ui.chat_images import StickerManager
+        self.sticker_manager = StickerManager()
+        profile_layout.addWidget(self.sticker_manager, 0, Qt.AlignTop)
         profile_layout.addStretch()
         profile_scroll.setWidget(profile_page)
         self.pages.addWidget(profile_scroll)
@@ -233,6 +248,22 @@ class DesktopShell(QWidget):
         self.timer.timeout.connect(self.refresh_status)
         self.timer.start(800)
         self.refresh_status()
+
+    def show_members(self):
+        dialog = QDialog(self.owner)
+        dialog.setWindowTitle('当前房间成员')
+        dialog.resize(320, 300)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(label('当前房间成员' if self.owner._room_code else '尚未加入房间', 'cardTitle'))
+        members = QListView()
+        members.setWordWrap(True)
+        members.setModel(self.owner._room_panel._member_list.model())
+        layout.addWidget(members)
+        close = QPushButton('关闭')
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close, alignment=Qt.AlignRight)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _home(self):
         scroll = QScrollArea()

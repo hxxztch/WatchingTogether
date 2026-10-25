@@ -106,7 +106,7 @@ def main():
             # One physical press only; Qt auto-repeat must not reach mpv or sliders.
             version = server.rooms[host._room_code].version
             app.sendEvent(host._player, QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.NoModifier, '', True))
-            QTest.keyClick(host._controls._danmaku_input, Qt.Key_Right)
+            QTest.keyClick(host._controls._bar_danmaku_input, Qt.Key_Right)
             QTest.qWait(100)
             assert server.rooms[host._room_code].version == version
             QTest.keyClick(host._player, Qt.Key_Right)

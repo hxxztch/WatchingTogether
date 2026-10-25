@@ -63,11 +63,11 @@ def main():
             assert len(guest._danmaku._labels) == 1
             guest._controls._bar_danmaku_toggle.setChecked(False)
             assert not guest._danmaku._labels
-            assert not guest._controls._danmaku_toggle.isChecked()
+            assert not guest._controls._bar_danmaku_toggle.isChecked()
             host._on_chat_image(value)
             wait(lambda: guest._room_panel._chat_list.count() == 2)
             assert not guest._danmaku._labels
-            guest._controls._danmaku_toggle.setChecked(True)
+            guest._controls._bar_danmaku_toggle.setChecked(True)
             assert not guest._danmaku._labels
             host._on_chat('new-after-enable')
             wait(lambda: len(guest._danmaku._labels) == 1)
@@ -78,16 +78,19 @@ def main():
                 guest._on_chat_image(value)
                 assert warning.call_count == 1
             guest._chat_images_supported = True
-            picker = EmojiPicker(host)
+            manager = host._shell.sticker_manager
             pack = Path(directory) / 'pack.zip'
             with zipfile.ZipFile(pack, 'w') as z:
                 z.writestr('../../outside.png', bytes(buffer.data()))
                 z.writestr('broken.png', b'not an image')
-            picker.start_import([pack])
-            wait(lambda: picker.worker is None)
+            manager.start_import([pack])
+            wait(lambda: manager.worker is None)
             assert len(list(library_dir().glob('*.png'))) == 1
             assert not (Path(directory).parent / 'outside.png').exists()
-            assert picker.list.count() == 17
+            picker = EmojiPicker(host)
+            assert picker.list.count() == 16
+            picker.browser.category.setCurrentIndex(2)
+            assert picker.list.count() == 1
             review = ROOT / 'build/beta013-review'
             review.mkdir(parents=True, exist_ok=True)
             picker.show()
@@ -95,10 +98,11 @@ def main():
             picker.grab().save(str(review / 'emoji-library.png'))
             chosen = []
             picker.image_chosen.connect(chosen.append)
-            picker.list.setCurrentRow(16)
+            picker.list.setCurrentRow(0)
             picker.choose()
             assert chosen == [value]
-            picker.remove()
+            manager.list.setCurrentRow(0)
+            manager.remove()
             assert not list(library_dir().glob('*.png'))
             picker.deleteLater()
             print('PASS: images delivered; disable clears immediately, disabled traffic not replayed; import/select/delete', flush=True)
