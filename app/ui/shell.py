@@ -38,7 +38,8 @@ QPushButton#leave_btn { background: rgba(255, 255, 255, 205); border-color: #e4d
 QToolButton#nav { border: none; border-radius: 9px; padding: 11px; background: transparent; color: #837367; text-align: left; }
 QToolButton#nav:hover { background: #ece1d7; }
 QToolButton#nav:checked { background: #e9d6c4; color: #9b5937; font-weight: 600; }
-QToolButton#collapse { border: none; border-radius: 6px; background: #eae0d6; padding: 6px; }
+QToolButton#collapse { border: none; border-radius: 6px; background: #eae0d6; padding: 0;
+    font-size: 22px; font-weight: 600; }
 QListWidget, QListView { background: #faf8f5; border: 1px solid #eee7e0; border-radius: 8px; padding: 6px; }
 QListWidget::item, QListView::item { padding: 5px 3px; }
 QListWidget::item:selected, QListView::item:selected { background: #eedbc9; color: #66462f; }
@@ -169,15 +170,16 @@ class DesktopShell(QWidget):
         self.settings_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.settings_button.clicked.connect(lambda: self.page_requested.emit(4))
         self.nav_buttons.append(self.settings_button)
-        self.side_note = label("一起看，才好看。\nv" + CLIENT_VERSION, "subtle")
-        side.addWidget(self.side_note)
+        side.addWidget(self.settings_button)
         self.collapse_button = QToolButton()
         self.collapse_button.setObjectName("collapse")
         self.collapse_button.setMinimumHeight(34)
+        self.collapse_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.collapse_button.clicked.connect(self.toggle_sidebar)
         side.addWidget(self.collapse_button)
         self.collapse_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        side.addWidget(self.settings_button)
+        self.side_note = label("一起看，才好看。\nv" + CLIENT_VERSION, "subtle")
+        side.addWidget(self.side_note)
         root.addWidget(self.sidebar)
 
         self.pages = QStackedWidget()
@@ -398,7 +400,7 @@ class DesktopShell(QWidget):
         self.side_note.setVisible(self.expanded)
         for button in self.nav_buttons:
             button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if self.expanded else Qt.ToolButtonIconOnly)
-        self.collapse_button.setText("‹  收起侧栏" if self.expanded else "›")
+        self.collapse_button.setText("‹" if self.expanded else "›")
         self.collapse_button.setToolTip("收起侧栏" if self.expanded else "展开侧栏")
         self.collapse_button.setAccessibleName(self.collapse_button.toolTip())
 
