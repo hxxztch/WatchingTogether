@@ -173,7 +173,6 @@ class DesktopShell(QWidget):
         self.settings_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.settings_button.clicked.connect(lambda: self.page_requested.emit(4))
         self.nav_buttons.append(self.settings_button)
-        side.addWidget(self.settings_button)
         self.collapse_button = QToolButton(self.sidebar)
         self.collapse_button.setObjectName("collapse")
         self.collapse_button.setFixedSize(28, 52)
@@ -181,6 +180,7 @@ class DesktopShell(QWidget):
         self.collapse_button.clicked.connect(self.toggle_sidebar)
         self.side_note = label("一起看，才好看。\nv" + CLIENT_VERSION, "subtle")
         side.addWidget(self.side_note)
+        side.addWidget(self.settings_button)
         self.sidebar.installEventFilter(self)
         root.addWidget(self.sidebar)
 
