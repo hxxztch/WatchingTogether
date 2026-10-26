@@ -97,8 +97,9 @@ def main():
             def choose_emoji():
                 dialog = app.activeModalWidget()
                 assert isinstance(dialog, EmojiPicker)
-                dialog.list.setCurrentRow(0)
-                dialog.choose()
+                assert not dialog.select.isVisible()
+                QTest.mouseClick(dialog.list.viewport(), Qt.LeftButton,
+                                 pos=dialog.list.visualItemRect(dialog.list.item(0)).center())
             with patch.object(window._network, 'send') as send:
                 QTimer.singleShot(100, choose_emoji)
                 window._choose_emoji()
@@ -167,6 +168,10 @@ def main():
             window._switch_page(3)
             manager.browser.category.setCurrentIndex(0)
             QTest.qWait(200)
+            for card in (window._shell.profile, manager):
+                container = card.parentWidget().parentWidget()
+                center = card.mapTo(container, card.rect().center()).x()
+                assert abs(center - container.width() / 2) < 3
             window.grab().save(str(review / 'profile.png'))
             for editor in (QLineEdit(), QTextEdit(), QPlainTextEdit()):
                 menu = edit_menu(editor)

@@ -67,11 +67,10 @@ class StickerBrowser(QWidget):
         self.list = QListWidget()
         self.list.setViewMode(QListWidget.IconMode)
         self.list.setResizeMode(QListWidget.Adjust)
-        self.list.setIconSize(QSize(56, 56))
-        self.list.setGridSize(QSize(88, 88))
+        self.list.setIconSize(QSize(40, 40))
         self.list.setMovement(QListWidget.Static)
         self.list.setTextElideMode(Qt.ElideRight)
-        self.list.setMinimumHeight(180)
+        self.list.setMinimumHeight(100)
         layout.addWidget(self.list)
         self.reload()
 
@@ -91,10 +90,11 @@ class StickerBrowser(QWidget):
     def load_items(self):
         self.list.clear()
         group = self.category.currentData()
+        self.list.setGridSize(QSize(48, 48) if group == 'system' else QSize(72, 72))
         if group == 'system':
             for emoji in EMOJIS:
                 item = QListWidgetItem(emoji)
-                item.setFont(QFont('Segoe UI Emoji', 22))
+                item.setFont(QFont('Segoe UI Emoji', 14))
                 item.setData(Qt.UserRole, ('text', emoji))
                 self.list.addItem(item)
         else:
@@ -103,7 +103,7 @@ class StickerBrowser(QWidget):
                     continue
                 try:
                     value = base64.b64encode((library_dir() / filename).read_bytes()).decode('ascii')
-                    item = QListWidgetItem(QIcon(image_pixmap(value, 56)), entry['name'])
+                    item = QListWidgetItem(QIcon(image_pixmap(value, 40)), entry['name'])
                     item.setToolTip(entry['name'])
                     item.setData(Qt.UserRole, ('image', value, filename))
                     self.list.addItem(item)
@@ -118,13 +118,15 @@ class EmojiPicker(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle('发送表情与图片')
-        self.resize(480, 430)
+        self.resize(440, 320)
+        self._chosen = False
         layout = QVBoxLayout(self)
         self.browser = StickerBrowser()
         self.list = self.browser.list
-        self.list.itemDoubleClicked.connect(self.choose)
+        self.list.itemClicked.connect(self._clicked)
+        self.list.itemActivated.connect(self.choose)
         layout.addWidget(self.browser)
-        note = QLabel('系统 emoji 插入聊天文字；图片单独发送。\n导入、重命名和删除请前往个人中心。')
+        note = QLabel('单击系统 emoji 插入聊天光标位置；图片单独发送。\n导入、重命名和删除请前往个人中心。')
         note.setWordWrap(True)
         layout.addWidget(note)
         row = QHBoxLayout()
@@ -132,7 +134,7 @@ class EmojiPicker(QDialog):
         upload.clicked.connect(self.upload)
         row.addWidget(upload)
         row.addStretch()
-        self.select = QPushButton()
+        self.select = QPushButton('单独发送')
         self.select.clicked.connect(self.choose)
         row.addWidget(self.select)
         layout.addLayout(row)
@@ -140,11 +142,16 @@ class EmojiPicker(QDialog):
         self.update_action()
 
     def update_action(self):
-        self.select.setText('插入文字' if self.browser.category.currentData() == 'system' else '单独发送')
+        self.select.setVisible(self.browser.category.currentData() != 'system')
+
+    def _clicked(self, item):
+        if item.data(Qt.UserRole)[0] == 'text':
+            self.choose()
 
     def choose(self, *_):
         item = self.list.currentItem()
-        if item:
+        if item and not self._chosen:
+            self._chosen = True
             kind, value, *_ = item.data(Qt.UserRole)
             (self.text_chosen if kind == 'text' else self.image_chosen).emit(value)
             self.accept()
@@ -166,11 +173,11 @@ class StickerManager(QWidget):
         super().__init__()
         self.setObjectName('roomCard')
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setMaximumWidth(840)
+        self.setMaximumWidth(720)
         self.worker = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
         title = QLabel('表情包管理')
         title.setObjectName('heading')
         layout.addWidget(title)
@@ -204,6 +211,7 @@ class StickerManager(QWidget):
         self.update_actions()
 
     def update_actions(self, *_):
+        self.list.setFixedHeight(116 if self.browser.category.currentData() == 'system' else 164)
         item = self.list.currentItem()
         editable = bool(item and item.data(Qt.UserRole)[0] == 'image')
         self.rename_button.setEnabled(editable)

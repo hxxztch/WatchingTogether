@@ -7,6 +7,21 @@ import sys
 _dll_directories = {}
 
 
+def configure_taskbar_identity():
+    """Keep the client separate from other applications using pythonw.exe."""
+    if sys.platform != 'win32':
+        return
+    import ctypes
+    app_id = 'WatchingTogether.Client' + ('' if getattr(sys, 'frozen', False) else '.Preview')
+    setter = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+    setter.argtypes = [ctypes.c_wchar_p]
+    setter.restype = ctypes.c_long
+    result = setter(app_id)
+    if result != 0:
+        import logging
+        logging.warning('Could not set taskbar identity: HRESULT 0x%08x', result & 0xffffffff)
+
+
 def configure_runtime():
     project = Path(__file__).resolve().parent.parent
     frozen = getattr(sys, "frozen", False)
