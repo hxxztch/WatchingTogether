@@ -1,5 +1,5 @@
 """Warm desktop navigation and home page for the isolated UI preview."""
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout,
@@ -38,8 +38,11 @@ QPushButton#leave_btn { background: rgba(255, 255, 255, 205); border-color: #e4d
 QToolButton#nav { border: none; border-radius: 9px; padding: 11px; background: transparent; color: #837367; text-align: left; }
 QToolButton#nav:hover { background: #ece1d7; }
 QToolButton#nav:checked { background: #e9d6c4; color: #9b5937; font-weight: 600; }
-QToolButton#collapse { border: none; border-radius: 6px; background: #eae0d6; padding: 0;
-    font-size: 22px; font-weight: 600; }
+QToolButton#collapse { border: 1px solid #ece5de; border-right: none;
+    border-top-left-radius: 9px; border-bottom-left-radius: 9px;
+    background: #f7f3ef; color: #a99b8e; padding: 0;
+    font-size: 20px; font-weight: 600; }
+QToolButton#collapse:hover { background: #efe8e1; color: #806f60; }
 QListWidget, QListView { background: #faf8f5; border: 1px solid #eee7e0; border-radius: 8px; padding: 6px; }
 QListWidget::item, QListView::item { padding: 5px 3px; }
 QListWidget::item:selected, QListView::item:selected { background: #eedbc9; color: #66462f; }
@@ -171,15 +174,14 @@ class DesktopShell(QWidget):
         self.settings_button.clicked.connect(lambda: self.page_requested.emit(4))
         self.nav_buttons.append(self.settings_button)
         side.addWidget(self.settings_button)
-        self.collapse_button = QToolButton()
+        self.collapse_button = QToolButton(self.sidebar)
         self.collapse_button.setObjectName("collapse")
-        self.collapse_button.setMinimumHeight(34)
+        self.collapse_button.setFixedSize(28, 52)
         self.collapse_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.collapse_button.clicked.connect(self.toggle_sidebar)
-        side.addWidget(self.collapse_button)
-        self.collapse_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.side_note = label("一起看，才好看。\nv" + CLIENT_VERSION, "subtle")
         side.addWidget(self.side_note)
+        self.sidebar.installEventFilter(self)
         root.addWidget(self.sidebar)
 
         self.pages = QStackedWidget()
@@ -394,6 +396,17 @@ class DesktopShell(QWidget):
         self.expanded = not self.expanded
         self._apply_sidebar()
 
+    def eventFilter(self, obj, event):
+        if obj is self.sidebar and event.type() in (QEvent.Resize, QEvent.Show):
+            self._position_collapse()
+        return super().eventFilter(obj, event)
+
+    def _position_collapse(self):
+        button = self.collapse_button
+        button.move(self.sidebar.width() - button.width(),
+                    max(0, (self.sidebar.height() - button.height()) // 2))
+        button.raise_()
+
     def _apply_sidebar(self):
         self.sidebar.setFixedWidth(224 if self.expanded else 76)
         self.brand_text.setVisible(self.expanded)
@@ -403,6 +416,7 @@ class DesktopShell(QWidget):
         self.collapse_button.setText("‹" if self.expanded else "›")
         self.collapse_button.setToolTip("收起侧栏" if self.expanded else "展开侧栏")
         self.collapse_button.setAccessibleName(self.collapse_button.toolTip())
+        self._position_collapse()
 
     def fullscreen(self, enabled):
         self.sidebar.setVisible(not enabled)
