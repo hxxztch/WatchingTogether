@@ -408,7 +408,7 @@ class DesktopShell(QWidget):
         button.raise_()
 
     def _apply_sidebar(self):
-        self.sidebar.setFixedWidth(224 if self.expanded else 76)
+        self.sidebar.setFixedWidth(190 if self.expanded else 76)
         self.brand_text.setVisible(self.expanded)
         self.side_note.setVisible(self.expanded)
         for button in self.nav_buttons:

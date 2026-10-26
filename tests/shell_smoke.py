@@ -102,7 +102,7 @@ def main():
             assert not host._shell.expanded
             host.grab().save(str(output / 'home-collapsed.png'))
             QTest.mouseClick(host._shell.collapse_button, Qt.LeftButton)
-            assert host._shell.expanded and host._shell.sidebar.width() == 224
+            assert host._shell.expanded and host._shell.sidebar.width() == 190
             host.grab().save(str(output / 'home-expanded.png'))
             QTest.mouseClick(host._shell.enter_button, Qt.LeftButton)
             wait(lambda: host._player.isVisible())
