@@ -62,6 +62,8 @@ pip install -r requirements.txt
 
 发布新 beta 时，先修改 `app/version.py` 中的 `CLIENT_VERSION`，提交并推送代码，再推送同名标签。[GitHub Actions](.github/workflows/release-beta.yml) 会在 Windows 上安装 `packaging/requirements-lock.txt`、构建并校验便携包、生成完整 ZIP 与差异包，创建 Release 后更新静态发布清单。无需手工打包或上传文件。只有标签名与代码版本一致时才会发布。
 
+同版本修订会更新同名 Release 文件，但现有客户端只识别版本号更高的更新。已经安装该版本的用户需手动下载新的完整 ZIP；换目录安装时，请自行保留原目录的 `config.json` 与 `stickers`。
+
 客户端把启动环境、关键操作、异常与更新脚本步骤写入 EXE 同目录的 `crash.log`（每文件 2 MB，保留 3 份历史）；Python 原生故障堆栈写入 `fatal.log`。目录不可写时，日志写入 `%LOCALAPPDATA%\WatchingTogether\logs`。日志不会自动上传，不记录昵称、房间邀请、聊天、媒体路径或账号 Cookie。反馈问题时可提供对应时间段的日志；分享前仍应检查日志中的异常堆栈是否含个人路径。
 
 ### 启动服务端
