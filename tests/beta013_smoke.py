@@ -155,6 +155,7 @@ def main():
                 settings.install_update()
                 assert launch.call_count == quit_app.call_count == 1
                 assert host._closing and not host._pip.isVisible() and host._rooms.host is None
+                assert not backend._event_thread.is_alive(), 'mpv thread must stop before Qt exits'
             print('PASS: update shutdown closes active PiP and room before quitting', flush=True)
         finally:
             for window in (host, guest):

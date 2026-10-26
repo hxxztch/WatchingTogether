@@ -286,7 +286,15 @@ class MpvWidget(QWidget):
         if self._player:
             self._player.stop()
 
-    def closeEvent(self, event):
+    def shutdown(self):
+        """Join mpv's event thread before Qt destroys the native video window."""
+        self._setup_done = True  # A late show event must not recreate the backend.
+        self._loading = False
+        self._subtitle_history.clear()
         if self._player:
-            self._player.stop()
+            self._player.terminate()
+            self._player = None
+
+    def closeEvent(self, event):
+        self.shutdown()
         super().closeEvent(event)

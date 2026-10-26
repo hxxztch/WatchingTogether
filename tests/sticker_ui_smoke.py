@@ -183,8 +183,10 @@ def main():
             print('PASS: chat grows on collapse; member details share live model; single bottom toggle; Chinese edit menus; centered room cards')
             manager.start_import([source] * 100, '退出时中断导入')
         finally:
+            backend = window._player._player
             window.close()
             assert manager.worker is None or not manager.worker.isRunning()
+            assert backend is None or not backend._event_thread.is_alive()
             if window._player._player:
                 window._player._player.terminate()
             app.processEvents()

@@ -1115,4 +1115,5 @@ class MainWindow(QMainWindow):
         self._danmaku._timer.stop()
         self._player.stop()
         self._network.stop()
+        self._player.shutdown()
         super().closeEvent(event)

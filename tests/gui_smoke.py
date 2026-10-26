@@ -155,7 +155,8 @@ def main():
                 window.close()
                 window._network.stop()
             for player in players:
-                player.terminate()
+                if player.handle is not None:
+                    player.terminate()
             loop.call_soon_threadsafe(stop.set)
             thread.join(timeout=5)
     assert not exceptions, "Qt callback exception during shutdown"
