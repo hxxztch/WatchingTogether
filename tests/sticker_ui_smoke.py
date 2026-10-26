@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.runtime import configure_runtime
 configure_runtime()
-from PySide6.QtCore import Qt, QTimer, QBuffer, QIODevice
+from PySide6.QtCore import Qt, QTimer, QBuffer, QIODevice, QPoint
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit, QTabBar, QToolButton
+from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit, QTabBar, QToolButton, QFileDialog
 from PySide6.QtTest import QTest
 from app.ui.main_window import MainWindow
 from app.ui.chat_images import EmojiPicker, EMOJIS, library_dir, prepare_image
@@ -88,11 +88,21 @@ def main():
             assert read_library()['items'][legacy_key]['group'] == 'custom'
             picker = EmojiPicker(window)
             assert picker.list.count() == 16
+            assert picker.browser.upload_button.text() == '+'
+            picker.show()
+            app.processEvents()
+            assert picker.browser.category.width() == picker.browser.category.sizeHint().width()
+            assert picker.browser.upload_button.x() > picker.browser.category.geometry().right()
             QTest.mouseClick(picker.browser.category, Qt.LeftButton,
                              pos=picker.browser.category.tabRect(1).center())
             assert picker.list.count() == 2
             assert '改名后的图片' in [picker.list.item(i).text() for i in range(2)]
             assert not any('导入' in b.text() or '删除' in b.text() or '重命名' in b.text() for b in picker.findChildren(QPushButton))
+            chosen_images = []
+            picker.image_chosen.connect(chosen_images.append)
+            with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
+                QTest.mouseClick(picker.browser.upload_button, Qt.LeftButton)
+            assert chosen_images and not picker.isVisible()
             picker.deleteLater()
             window._switch_page(1)
             window._room_code = '1234'
@@ -104,15 +114,24 @@ def main():
             field = window._room_panel._chat_input
             field.setText('你好世界')
             field.setCursorPosition(2)
-            def choose_emoji():
-                dialog = app.activeModalWidget()
-                assert isinstance(dialog, EmojiPicker)
+            with patch.object(window._network, 'send') as send:
+                QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
+                dialog = window._emoji_popup
+                assert isinstance(dialog, EmojiPicker) and dialog.isVisible()
+                assert dialog.y() + dialog.height() < field.mapToGlobal(field.rect().topLeft()).y()
                 assert not dialog.select.isVisible()
+                dialog.grab().save(str(review / 'chat-emoji-popup.png'))
+                QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
+                assert not dialog.isVisible()
+                QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
+                dialog = window._emoji_popup
+                assert dialog.isVisible()
+                QTest.mouseClick(window._shell.nav_buttons[1], Qt.LeftButton)
+                assert not dialog.isVisible()
+                QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
+                dialog = window._emoji_popup
                 QTest.mouseClick(dialog.list.viewport(), Qt.LeftButton,
                                  pos=dialog.list.visualItemRect(dialog.list.item(0)).center())
-            with patch.object(window._network, 'send') as send:
-                QTimer.singleShot(100, choose_emoji)
-                window._choose_emoji()
                 assert field.text() == '你好' + EMOJIS[0] + '世界'
                 assert not send.called
                 QTest.keyClick(field, Qt.Key_Return)
@@ -205,6 +224,20 @@ def main():
             assert tabs.currentIndex() == 13
             QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(14).center())
             assert tabs.currentIndex() == 14 and manager.list.count() == 1
+            overflow = EmojiPicker(window)
+            overflow.show()
+            app.processEvents()
+            assert overflow.browser.category.width() + overflow.browser.upload_button.width() + 4 <= overflow.browser.width()
+            assert overflow.browser.upload_button.geometry().right() <= overflow.browser.width()
+            assert overflow.browser.category.findChildren(QToolButton)
+            bar = overflow.browser.category
+            first_x = bar.tabRect(0).x()
+            QTest.mousePress(bar, Qt.LeftButton, pos=QPoint(150, 20))
+            QTest.mouseMove(bar, QPoint(90, 20))
+            QTest.mouseMove(bar, QPoint(30, 20))
+            QTest.mouseRelease(bar, Qt.LeftButton, pos=QPoint(30, 20))
+            assert bar.tabRect(0).x() < first_x
+            overflow.close()
             print('PASS: categorized persistent imports/rename/delete; emoji inserts in draft; image sends alone; legacy library migrated')
             print('PASS: chat grows on collapse; member details share live model; single bottom toggle; Chinese edit menus; centered room cards')
             manager.start_import([source] * 100, '退出时中断导入')

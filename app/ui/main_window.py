@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QMessageBox,
     QApplication, QLabel, QPushButton, QFileDialog,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRect
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QRect, QPoint
 import base64
 import threading
 from PySide6.QtGui import QIcon, QPixmap
@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         from app.ui.text_menus import install_edit_menus
         install_edit_menus()
         self._room_panel = RoomPanel()
+        self._emoji_popup = None
         from app.room_controller import RoomController
         self._rooms = RoomController(self)
         self._room_panel.cancel_requested.connect(self._rooms.cancel)
@@ -478,11 +479,25 @@ class MainWindow(QMainWindow):
 
     def _choose_emoji(self):
         from app.ui.chat_images import EmojiPicker
+        if self._emoji_popup is not None and self._emoji_popup.isVisible():
+            self._emoji_popup.close()
+            return
+        if self._emoji_popup is not None:
+            self._emoji_popup.deleteLater()
         dialog = EmojiPicker(self)
+        self._emoji_popup = dialog
         dialog.text_chosen.connect(self._insert_chat_emoji)
         dialog.image_chosen.connect(self._on_chat_image)
-        dialog.exec()
-        dialog.deleteLater()
+        chat_list = self._room_panel._chat_list
+        input_field = self._room_panel._chat_input
+        position = chat_list.mapToGlobal(QPoint(0, 0))
+        input_top = input_field.mapToGlobal(QPoint(0, 0)).y()
+        screen = self._room_panel._emoji_button.screen().availableGeometry()
+        x = max(screen.left(), min(position.x(), screen.right() - dialog.width() + 1))
+        y = max(screen.top(), min(input_top - dialog.height() - 6,
+                                  screen.bottom() - dialog.height() + 1))
+        dialog.move(x, y)
+        dialog.show()
 
     def _on_chat_image(self, image):
         if not self._room_ready:
@@ -858,6 +873,15 @@ class MainWindow(QMainWindow):
             self._exit_fullscreen()
 
     def eventFilter(self, obj, event):
+        if (event.type() == QEvent.MouseButtonPress and self._emoji_popup is not None
+                and self._emoji_popup.isVisible() and hasattr(event, 'globalPosition')):
+            point = event.globalPosition().toPoint()
+            if not self._emoji_popup.frameGeometry().contains(point):
+                button = self._room_panel._emoji_button
+                clicked_button = QRect(button.mapToGlobal(QPoint(0, 0)), button.size()).contains(point)
+                self._emoji_popup.close()
+                if clicked_button:
+                    return True
         if obj is self and event.type() in (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.WindowStateChange):
             if event.type() == QEvent.WindowStateChange:
                 QTimer.singleShot(0, self._sync_minimized_player)

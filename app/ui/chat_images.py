@@ -4,7 +4,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QSize, Signal
 from PySide6.QtGui import QImageReader, QPixmap, QIcon, QFont, QPainter, QColor
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox, QTabBar, QWidget, QInputDialog)
+    QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox, QTabBar,
+    QWidget, QInputDialog, QStylePainter, QStyleOptionTab, QStyle, QToolButton)
 import app.config as config
 from app.chat_media import MAX_IMAGE_BYTES, image_bytes
 
@@ -81,6 +82,48 @@ class StickerCategoryBar(QTabBar):
             QTabBar::tab:hover { background: #f8f0e8; }
             QTabBar::tab:selected { background: #f2e5d9; border-color: #d9c5b4; }
         ''')
+        self._drag_x = None
+        self._drag_distance = 0
+
+    def paintEvent(self, event):
+        # Qt reserves label space even for icon-only tabs on some Windows themes.
+        painter = QStylePainter(self)
+        for index in range(self.count()):
+            option = QStyleOptionTab()
+            self.initStyleOption(option, index)
+            painter.drawControl(QStyle.CE_TabBarTabShape, option)
+            icon = self.tabIcon(index)
+            if not icon.isNull():
+                pixmap = icon.pixmap(self.iconSize())
+                rect = self.tabRect(index)
+                painter.drawPixmap(rect.center().x() - pixmap.width() // 2,
+                                   rect.center().y() - pixmap.height() // 2, pixmap)
+
+    def mousePressEvent(self, event):
+        self._drag_x = event.position().x() if event.button() == Qt.LeftButton else None
+        self._drag_distance = 0
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_x is not None and event.buttons() & Qt.LeftButton:
+            delta = event.position().x() - self._drag_x
+            self._drag_distance += delta
+            self._drag_x = event.position().x()
+            buttons = [b for b in self.findChildren(QToolButton) if b.isVisible()]
+            while len(buttons) == 2 and abs(self._drag_distance) >= 24:
+                direction = Qt.LeftArrow if self._drag_distance > 0 else Qt.RightArrow
+                button = next((b for b in buttons if b.arrowType() == direction), None)
+                if button is None or not button.isEnabled():
+                    break
+                button.click()
+                self._drag_distance -= 24 if self._drag_distance > 0 else -24
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_x = None
+        super().mouseReleaseEvent(event)
 
     def addItem(self, title, data, icon):
         index = self.addTab(icon, '')
@@ -104,13 +147,28 @@ class StickerCategoryBar(QTabBar):
 
 class StickerBrowser(QWidget):
     """Read-only selection shared by profile management and the chat picker."""
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, upload_callback=None, compact=False):
         super().__init__(parent)
+        self._compact = compact
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.category = StickerCategoryBar()
         self.category.currentChanged.connect(self.load_items)
-        layout.addWidget(self.category)
+        if upload_callback is None:
+            layout.addWidget(self.category)
+        else:
+            category_row = QHBoxLayout()
+            category_row.setContentsMargins(0, 0, 0, 0)
+            category_row.setSpacing(4)
+            category_row.addWidget(self.category)
+            self.upload_button = QPushButton('+')
+            self.upload_button.setAccessibleName('上传图片发送')
+            self.upload_button.setToolTip('上传图片发送')
+            self.upload_button.setFixedSize(36, 40)
+            self.upload_button.clicked.connect(upload_callback)
+            category_row.addWidget(self.upload_button)
+            category_row.addStretch()
+            layout.addLayout(category_row)
         self.list = QListWidget()
         self.list.setViewMode(QListWidget.IconMode)
         self.list.setResizeMode(QListWidget.Adjust)
@@ -120,6 +178,15 @@ class StickerBrowser(QWidget):
         self.list.setMinimumHeight(100)
         layout.addWidget(self.list)
         self.reload()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_category_bar()
+
+    def _fit_category_bar(self):
+        if hasattr(self, 'upload_button'):
+            available = max(48, self.width() - self.upload_button.width() - 4)
+            self.category.setFixedWidth(min(self.category.sizeHint().width(), available))
 
     def reload(self, group=None):
         group = group or self.category.currentData() or 'system'
@@ -141,12 +208,15 @@ class StickerBrowser(QWidget):
             self.category.addItem('外部表情包 · ' + name, key, icon)
         self.category.setCurrentIndex(max(0, self.category.findData(group)))
         self.category.blockSignals(False)
+        self._fit_category_bar()
         self.load_items()
 
     def load_items(self):
         self.list.clear()
         group = self.category.currentData()
-        self.list.setGridSize(QSize(48, 48) if group == 'system' else QSize(72, 72))
+        edge = (40 if group == 'system' else 64) if self._compact else \
+               (48 if group == 'system' else 72)
+        self.list.setGridSize(QSize(edge, edge))
         if group == 'system':
             for emoji in EMOJIS:
                 item = QListWidgetItem(emoji)
@@ -174,26 +244,20 @@ class EmojiPicker(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle('发送表情与图片')
-        self.resize(440, 320)
+        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setFixedSize(264, 240)
         self._chosen = False
         layout = QVBoxLayout(self)
-        self.browser = StickerBrowser()
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+        self.browser = StickerBrowser(upload_callback=self.upload, compact=True)
         self.list = self.browser.list
         self.list.itemClicked.connect(self._clicked)
         self.list.itemActivated.connect(self.choose)
         layout.addWidget(self.browser)
-        note = QLabel('单击系统 emoji 插入聊天光标位置；图片单独发送。\n导入、重命名和删除请前往个人中心。')
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        row = QHBoxLayout()
-        upload = QPushButton('上传图片发送')
-        upload.clicked.connect(self.upload)
-        row.addWidget(upload)
-        row.addStretch()
         self.select = QPushButton('单独发送')
         self.select.clicked.connect(self.choose)
-        row.addWidget(self.select)
-        layout.addLayout(row)
+        layout.addWidget(self.select, alignment=Qt.AlignRight)
         self.browser.category.currentChanged.connect(self.update_action)
         self.update_action()
 
