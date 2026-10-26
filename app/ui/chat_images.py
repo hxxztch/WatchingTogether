@@ -2,9 +2,9 @@
 import base64
 from pathlib import Path
 from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QSize, Signal
-from PySide6.QtGui import QImageReader, QPixmap, QIcon, QFont
+from PySide6.QtGui import QImageReader, QPixmap, QIcon, QFont, QPainter, QColor
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox, QComboBox, QWidget, QInputDialog)
+    QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox, QTabBar, QWidget, QInputDialog)
 import app.config as config
 from app.chat_media import MAX_IMAGE_BYTES, image_bytes
 
@@ -54,15 +54,62 @@ def library_dir():
 from app.ui.sticker_library import ImportImages, read_library, save_library
 
 
+def symbol_icon(symbol, color=None):
+    pixmap = QPixmap(40, 40)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setFont(QFont('Segoe UI Emoji' if color is None else 'Segoe UI Symbol', 22))
+    if color:
+        painter.setPen(QColor(color))
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, symbol)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class StickerCategoryBar(QTabBar):
+    """Icon-only category tabs with the same selection API used by the browser."""
+    def __init__(self):
+        super().__init__()
+        self.setAccessibleName('表情分类')
+        self.setExpanding(False)
+        self.setUsesScrollButtons(True)
+        self.setIconSize(QSize(32, 32))
+        self.setStyleSheet('''
+            QTabBar::tab { width: 44px; height: 44px; margin-right: 4px;
+                border: 1px solid transparent; border-radius: 9px; background: transparent; }
+            QTabBar::tab:hover { background: #f8f0e8; }
+            QTabBar::tab:selected { background: #f2e5d9; border-color: #d9c5b4; }
+        ''')
+
+    def addItem(self, title, data, icon):
+        index = self.addTab(icon, '')
+        self.setTabData(index, data)
+        self.setTabToolTip(index, title)
+        return index
+
+    def currentData(self):
+        return self.tabData(self.currentIndex()) if self.currentIndex() >= 0 else None
+
+    def findData(self, data):
+        for index in range(self.count()):
+            if self.tabData(index) == data:
+                return index
+        return -1
+
+    def clear(self):
+        while self.count():
+            self.removeTab(0)
+
+
 class StickerBrowser(QWidget):
     """Read-only selection shared by profile management and the chat picker."""
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.category = QComboBox()
-        self.category.setAccessibleName('表情分类')
-        self.category.currentIndexChanged.connect(self.load_items)
+        self.category = StickerCategoryBar()
+        self.category.currentChanged.connect(self.load_items)
         layout.addWidget(self.category)
         self.list = QListWidget()
         self.list.setViewMode(QListWidget.IconMode)
@@ -79,10 +126,19 @@ class StickerBrowser(QWidget):
         self.metadata = read_library()
         self.category.blockSignals(True)
         self.category.clear()
-        self.category.addItem('系统 emoji · 插入文字', 'system')
-        self.category.addItem('自定义图片 · 单独发送', 'custom')
+        self.category.addItem('系统 emoji · 插入文字', 'system', symbol_icon(EMOJIS[0]))
+        self.category.addItem('自定义图片 · 单独发送', 'custom', symbol_icon('♥', '#e95068'))
         for key, name in self.metadata['packs'].items():
-            self.category.addItem('外部表情包 · ' + name, key)
+            icon = QIcon()
+            for filename, entry in self.metadata['items'].items():
+                if entry['group'] == key:
+                    try:
+                        value = base64.b64encode((library_dir() / filename).read_bytes()).decode('ascii')
+                        icon = QIcon(image_pixmap(value, 32))
+                        break
+                    except (ValueError, OSError):
+                        continue
+            self.category.addItem('外部表情包 · ' + name, key, icon)
         self.category.setCurrentIndex(max(0, self.category.findData(group)))
         self.category.blockSignals(False)
         self.load_items()
@@ -138,7 +194,7 @@ class EmojiPicker(QDialog):
         self.select.clicked.connect(self.choose)
         row.addWidget(self.select)
         layout.addLayout(row)
-        self.browser.category.currentIndexChanged.connect(self.update_action)
+        self.browser.category.currentChanged.connect(self.update_action)
         self.update_action()
 
     def update_action(self):
@@ -206,7 +262,7 @@ class StickerManager(QWidget):
             row.addStretch()
             rows.addLayout(row)
         layout.addWidget(self.actions)
-        self.browser.category.currentIndexChanged.connect(self.update_actions)
+        self.browser.category.currentChanged.connect(self.update_actions)
         self.list.currentItemChanged.connect(self.update_actions)
         self.update_actions()
 

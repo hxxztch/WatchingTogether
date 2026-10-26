@@ -15,7 +15,7 @@ from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import Qt, QTimer, QBuffer, QIODevice
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit
+from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit, QTabBar, QToolButton
 from PySide6.QtTest import QTest
 from app.ui.main_window import MainWindow
 from app.ui.chat_images import EmojiPicker, EMOJIS, library_dir, prepare_image
@@ -71,6 +71,15 @@ def main():
             with patch.object(QInputDialog, 'getText', return_value=('重新命名的合集', True)):
                 manager.rename_pack_button.click()
             assert read_library()['packs'][pack] == '重新命名的合集'
+            tabs = manager.browser.category
+            assert isinstance(tabs, QTabBar) and tabs.count() == 3
+            assert all(not tabs.tabIcon(index).isNull() for index in range(3))
+            assert tabs.tabToolTip(2).endswith('重新命名的合集')
+            assert tabs.tabIcon(2).pixmap(32, 32).toImage().pixelColor(16, 16).red() > 200
+            QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(0).center())
+            assert manager.list.count() == len(EMOJIS)
+            QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(2).center())
+            assert manager.list.count() == 1 and tabs.currentData() == pack
             # Legacy flat libraries appear under Custom without reimporting.
             value = prepare_image(bytes(data.data()))
             legacy_data = base64.b64decode(value)
@@ -79,7 +88,8 @@ def main():
             assert read_library()['items'][legacy_key]['group'] == 'custom'
             picker = EmojiPicker(window)
             assert picker.list.count() == 16
-            picker.browser.category.setCurrentIndex(1)
+            QTest.mouseClick(picker.browser.category, Qt.LeftButton,
+                             pos=picker.browser.category.tabRect(1).center())
             assert picker.list.count() == 2
             assert '改名后的图片' in [picker.list.item(i).text() for i in range(2)]
             assert not any('导入' in b.text() or '删除' in b.text() or '重命名' in b.text() for b in picker.findChildren(QPushButton))
@@ -184,6 +194,17 @@ def main():
             manager.list.setCurrentRow(0)
             manager.remove_button.click()
             assert source.exists() and len(read_library()['items']) == 2
+            for index in range(12):
+                manager.start_import([source], f'合集 {index + 1}')
+                wait(lambda: manager.worker is None)
+            tabs = manager.browser.category
+            assert tabs.count() == 15 and tabs.currentIndex() == 14
+            assert any(button.isVisible() for button in tabs.findChildren(QToolButton))
+            assert tabs.tabRect(14).center().x() < tabs.width()
+            QTest.keyClick(tabs, Qt.Key_Left)
+            assert tabs.currentIndex() == 13
+            QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(14).center())
+            assert tabs.currentIndex() == 14 and manager.list.count() == 1
             print('PASS: categorized persistent imports/rename/delete; emoji inserts in draft; image sends alone; legacy library migrated')
             print('PASS: chat grows on collapse; member details share live model; single bottom toggle; Chinese edit menus; centered room cards')
             manager.start_import([source] * 100, '退出时中断导入')
