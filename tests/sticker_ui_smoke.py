@@ -100,7 +100,10 @@ def main():
             assert not any('导入' in b.text() or '删除' in b.text() or '重命名' in b.text() for b in picker.findChildren(QPushButton))
             chosen_images = []
             picker.image_chosen.connect(chosen_images.append)
-            with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
+            def choose_upload(owner, *_):
+                assert owner is window and not picker.isVisible()
+                return str(source), ''
+            with patch.object(QFileDialog, 'getOpenFileName', side_effect=choose_upload):
                 QTest.mouseClick(picker.browser.upload_button, Qt.LeftButton)
             assert chosen_images and not picker.isVisible()
             picker.deleteLater()
@@ -128,6 +131,17 @@ def main():
                 assert dialog.isVisible()
                 QTest.mouseClick(window._shell.nav_buttons[1], Qt.LeftButton)
                 assert not dialog.isVisible()
+                QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
+                dialog = window._emoji_popup
+                def choose_chat_upload(owner, *_):
+                    assert owner is window and not dialog.isVisible()
+                    return str(source), ''
+                with patch.object(QFileDialog, 'getOpenFileName', side_effect=choose_chat_upload):
+                    QTest.mouseClick(dialog.browser.upload_button, Qt.LeftButton)
+                assert not dialog.isVisible()
+                assert send.call_args[0][0]['message'] == '[图片]'
+                assert field.text() == '你好世界'
+                send.reset_mock()
                 QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
                 dialog = window._emoji_popup
                 QTest.mouseClick(dialog.list.viewport(), Qt.LeftButton,

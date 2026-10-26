@@ -277,7 +277,11 @@ class EmojiPicker(QDialog):
             self.accept()
 
     def upload(self):
-        path, _ = QFileDialog.getOpenFileName(self, '发送图片', '', IMAGE_FILTER)
+        # A native file chooser must not be owned by a Qt.Popup: the popup
+        # loses focus as the chooser opens and can close its own child window.
+        owner = self.parentWidget()
+        self.close()
+        path, _ = QFileDialog.getOpenFileName(owner, '发送图片', '', IMAGE_FILTER)
         if path:
             try:
                 if Path(path).stat().st_size > 8 * 1024 * 1024:
