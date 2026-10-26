@@ -55,12 +55,12 @@ def library_dir():
 from app.ui.sticker_library import ImportImages, read_library, save_library
 
 
-def symbol_icon(symbol, color=None):
+def symbol_icon(symbol, color=None, font_size=22):
     pixmap = QPixmap(40, 40)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
-    painter.setFont(QFont('Segoe UI Emoji' if color is None else 'Segoe UI Symbol', 22))
+    painter.setFont(QFont('Segoe UI Emoji' if color is None else 'Segoe UI Symbol', font_size))
     if color:
         painter.setPen(QColor(color))
     painter.drawText(pixmap.rect(), Qt.AlignCenter, symbol)
@@ -193,8 +193,8 @@ class StickerBrowser(QWidget):
         self.metadata = read_library()
         self.category.blockSignals(True)
         self.category.clear()
-        self.category.addItem('系统 emoji · 插入文字', 'system', symbol_icon(EMOJIS[0]))
-        self.category.addItem('自定义图片 · 单独发送', 'custom', symbol_icon('♥', '#e95068'))
+        self.category.addItem('系统 emoji · 插入文字', 'system', symbol_icon(EMOJIS[0], font_size=19))
+        self.category.addItem('自定义图片 · 点击直接发送', 'custom', symbol_icon('♥', '#e95068'))
         for key, name in self.metadata['packs'].items():
             icon = QIcon()
             for filename, entry in self.metadata['items'].items():
@@ -205,7 +205,7 @@ class StickerBrowser(QWidget):
                         break
                     except (ValueError, OSError):
                         continue
-            self.category.addItem('外部表情包 · ' + name, key, icon)
+            self.category.addItem('外部表情包 · ' + name + ' · 点击直接发送', key, icon)
         self.category.setCurrentIndex(max(0, self.category.findData(group)))
         self.category.blockSignals(False)
         self._fit_category_bar()
@@ -252,24 +252,11 @@ class EmojiPicker(QDialog):
         layout.setSpacing(4)
         self.browser = StickerBrowser(upload_callback=self.upload, compact=True)
         self.list = self.browser.list
-        self.list.itemClicked.connect(self._clicked)
+        self.list.itemClicked.connect(self.choose)
         self.list.itemActivated.connect(self.choose)
         layout.addWidget(self.browser)
-        self.select = QPushButton('单独发送')
-        self.select.clicked.connect(self.choose)
-        layout.addWidget(self.select, alignment=Qt.AlignRight)
-        self.browser.category.currentChanged.connect(self.update_action)
-        self.update_action()
-
-    def update_action(self):
-        self.select.setVisible(self.browser.category.currentData() != 'system')
-
-    def _clicked(self, item):
-        if item.data(Qt.UserRole)[0] == 'text':
-            self.choose()
-
-    def choose(self, *_):
-        item = self.list.currentItem()
+    def choose(self, item=None):
+        item = item or self.list.currentItem()
         if item and not self._chosen:
             self._chosen = True
             kind, value, *_ = item.data(Qt.UserRole)

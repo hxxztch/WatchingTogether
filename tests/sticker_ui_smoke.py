@@ -74,7 +74,7 @@ def main():
             tabs = manager.browser.category
             assert isinstance(tabs, QTabBar) and tabs.count() == 3
             assert all(not tabs.tabIcon(index).isNull() for index in range(3))
-            assert tabs.tabToolTip(2).endswith('重新命名的合集')
+            assert '重新命名的合集' in tabs.tabToolTip(2)
             assert tabs.tabIcon(2).pixmap(32, 32).toImage().pixelColor(16, 16).red() > 200
             QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(0).center())
             assert manager.list.count() == len(EMOJIS)
@@ -98,6 +98,24 @@ def main():
             assert picker.list.count() == 2
             assert '改名后的图片' in [picker.list.item(i).text() for i in range(2)]
             assert not any('导入' in b.text() or '删除' in b.text() or '重命名' in b.text() for b in picker.findChildren(QPushButton))
+            assert not any(b.text() == '单独发送' for b in picker.findChildren(QPushButton))
+            chosen_custom = []
+            picker.image_chosen.connect(chosen_custom.append)
+            QTest.mouseClick(picker.list.viewport(), Qt.LeftButton,
+                             pos=picker.list.visualItemRect(picker.list.item(0)).center())
+            assert len(chosen_custom) == 1 and not picker.isVisible()
+            picker.deleteLater()
+            picker = EmojiPicker(window)
+            picker.browser.category.setCurrentIndex(2)
+            picker.show()
+            chosen_pack = []
+            picker.image_chosen.connect(chosen_pack.append)
+            QTest.mouseClick(picker.list.viewport(), Qt.LeftButton,
+                             pos=picker.list.visualItemRect(picker.list.item(0)).center())
+            assert len(chosen_pack) == 1 and not picker.isVisible()
+            picker.deleteLater()
+            picker = EmojiPicker(window)
+            picker.show()
             chosen_images = []
             picker.image_chosen.connect(chosen_images.append)
             def choose_upload(owner, *_):
@@ -122,7 +140,7 @@ def main():
                 dialog = window._emoji_popup
                 assert isinstance(dialog, EmojiPicker) and dialog.isVisible()
                 assert dialog.y() + dialog.height() < field.mapToGlobal(field.rect().topLeft()).y()
-                assert not dialog.select.isVisible()
+                assert not any(b.text() == '单独发送' for b in dialog.findChildren(QPushButton))
                 dialog.grab().save(str(review / 'chat-emoji-popup.png'))
                 QTest.mouseClick(window._room_panel._emoji_button, Qt.LeftButton)
                 assert not dialog.isVisible()

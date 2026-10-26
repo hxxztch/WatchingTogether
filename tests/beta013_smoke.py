@@ -98,8 +98,8 @@ def main():
             picker.grab().save(str(review / 'emoji-library.png'))
             chosen = []
             picker.image_chosen.connect(chosen.append)
-            picker.list.setCurrentRow(0)
-            picker.choose()
+            QTest.mouseClick(picker.list.viewport(), Qt.LeftButton,
+                             pos=picker.list.visualItemRect(picker.list.item(0)).center())
             assert chosen == [value]
             manager.list.setCurrentRow(0)
             manager.remove()
