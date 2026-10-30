@@ -12,7 +12,7 @@ FILES = ('repair_update.cmd', 'repair_update.ps1', 'apply_update.ps1', '修复�
 def build(output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    target = output / (VERSION + '-更新修复助手.zip')
+    target = output / (VERSION + '-update-repair.zip')
     prefix = VERSION + '-更新修复助手/'
     with zipfile.ZipFile(target, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for name in FILES:

@@ -52,6 +52,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $repair = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/repair-beta0.1.4" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not load repair release' }
+          foreach ($asset in $repair.assets) {
+            if ($asset.name -in @('beta0.1.4-.zip', 'beta0.1.4-.zip.sha256.txt')) {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not remove obsolete sanitized asset name' }
+            }
+          }
           $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/beta0.1.4" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Could not load client release' }
           $start = '<!-- update-repair-notice:start -->'
