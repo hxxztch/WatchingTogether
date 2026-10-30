@@ -29,6 +29,7 @@ def release(tag, assets):
 class UpdateTests(unittest.TestCase):
     def test_selects_latest_beta_with_matching_delta(self):
         releases = [
+            release('repair-beta0.1.4', ['beta0.1.4-更新修复助手.zip']),
             release("server1.2.0", ["server1.2.0.zip"]),
             release("beta0.1.1", ["beta0.1.1.zip", "beta0.1.0-to-beta0.1.1.delta.zip"]),
             release("beta0.1.2", ["beta0.1.2.zip", "beta0.1.0-to-beta0.1.2.delta.zip",
@@ -148,8 +149,20 @@ class UpdateTests(unittest.TestCase):
             target_pid = 2147483647  # Deliberately nonexistent Windows PID.
             try:
                 if mode != 'gone':
+                    child_code = 'import time; time.sleep(30)'
+                    if mode == 'delayed':
+                        # Signal via the updater log so a slow Windows runner
+                        # cannot let the test process exit before waiting starts.
+                        child_code = (
+                            'import pathlib, sys, time\n'
+                            'log = pathlib.Path(sys.argv[1])\n'
+                            'end = time.monotonic() + 12\n'
+                            'while not log.exists() or "waiting for client" not in log.read_text(encoding="utf-8"):\n'
+                            '    if time.monotonic() > end: sys.exit(2)\n'
+                            '    time.sleep(.02)\n'
+                            'time.sleep(.3)\n')
                     client = subprocess.Popen([getattr(sys, '_base_executable', sys.executable),
-                        '-c', 'import time; time.sleep(' + ('2' if mode == 'delayed' else '30') + ')'],
+                        '-c', child_code, str(install / 'crash.log')],
                         creationflags=subprocess.CREATE_NO_WINDOW)
                     target_pid = client.pid
                 started = time.monotonic()
@@ -173,7 +186,7 @@ class UpdateTests(unittest.TestCase):
                     self.assertIn('client exit confirmed' if mode == 'delayed' else 'client already exited', log)
                     if client:
                         self.assertIsNotNone(client.poll())
-                        self.assertGreater(time.monotonic() - started, 1)
+                        self.assertGreater(time.monotonic() - started, .2)
             finally:
                 if client:
                     if client.poll() is None:

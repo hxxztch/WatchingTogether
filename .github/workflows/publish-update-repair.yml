@@ -1,0 +1,71 @@
+name: Publish standalone update repair assistant
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['beta/0.1.4']
+    paths:
+      - '.github/workflows/publish-update-repair.yml'
+      - 'packaging/apply_update.ps1'
+      - 'packaging/repair_update.cmd'
+      - 'packaging/repair_update.ps1'
+      - 'packaging/build_update_repair.py'
+      - 'packaging/repair_release_notes.txt'
+      - 'packaging/修复升级说明.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/beta/0.1.4'
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify updater and repair package
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_updates.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Updater tests failed' }
+          python -m unittest discover -s tests -p test_repair_package.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Repair package tests failed' }
+          python packaging/build_update_repair.py
+          if ($LASTEXITCODE -ne 0) { throw 'Repair package build failed' }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: repair-beta0.1.4
+          target_commitish: ${{ github.sha }}
+          name: 'beta0.1.4 更新修复助手'
+          prerelease: true
+          make_latest: false
+          body_path: packaging/repair_release_notes.txt
+          files: dist/update-repair/*
+          fail_on_unmatched_files: true
+      - name: Add repair instructions to the client release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/beta0.1.4" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not load client release' }
+          $start = '<!-- update-repair-notice:start -->'
+          $end = '<!-- update-repair-notice:end -->'
+          $old = [regex]::Replace([string]$release.body, '(?s)<!-- update-repair-notice:start -->.*?<!-- update-repair-notice:end -->\s*', '')
+          $notice = @"
+          $start
+          已知 beta0.1.2 的自动更新可能在等待旧客户端退出时失败。请先关闭旧客户端，使用[独立更新修复助手](https://github.com/$env:GITHUB_REPOSITORY/releases/tag/repair-beta0.1.4)安装已下载的匹配差异包；完整使用方法见助手发行页。
+
+          当前 beta0.1.4 完整客户端尚未重新打包纳入退出等待修复，本次仅补充独立修复助手。配置和个人表情保留。
+          $end
+          "@
+          $payload = @{body = $notice.Trim() + "`n`n" + $old} | ConvertTo-Json -Depth 4
+          $file = Join-Path $env:RUNNER_TEMP 'update-repair-notice.json'
+          [IO.File]::WriteAllText($file, $payload, [Text.UTF8Encoding]::new($false))
+          gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" --input $file | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish repair notice' }
