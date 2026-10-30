@@ -184,13 +184,19 @@ def publish(tag, directory, token):
         notes += '\n\n完整包超过 Gitee 单附件限制：手动下载请将所有 .001/.002 分段与 merge-' + tag + '.cmd 放在同一目录，运行合并脚本得到完整 ZIP，再完整解压。客户端内更新会自动合并并校验。'
     entry = {'tag_name': tag, 'html_url': SOURCES['gitee'].page_url + '/' + tag, 'assets': assets}
     encoded = base64.b64encode(json.dumps(entry, ensure_ascii=False, separators=(',', ':')).encode('utf-8')).decode('ascii')
-    api.api('PATCH', '/releases/' + str(rid), {'body': notes + '\n\n' + MANIFEST_START + encoded + MANIFEST_END})
+    api.api('PATCH', '/releases/' + str(rid), {'tag_name': tag, 'name': tag,
+        'prerelease': 'true', 'body': notes + '\n\n' + MANIFEST_START + encoded + MANIFEST_END})
     # Publish discovery only after every attachment passed anonymous download verification.
     endpoint = '/contents/releases.json'
     old = api.api('GET', endpoint, {'ref': 'update-feed'}, missing=True)
+    # Gitee also uses HTTP 200 + [] for a missing path/ref in an empty tree.
+    if old == []:
+        old = None
     previous = []
     if old is None:
-        api.api('POST', '/branches', {'branch_name': 'update-feed', 'refs': tag})
+        branch = api.api('GET', '/branches/update-feed', missing=True)
+        if not branch:
+            api.api('POST', '/branches', {'branch_name': 'update-feed', 'refs': tag})
     else:
         previous = json.loads(base64.b64decode(old['content']).decode('utf-8'))
     feed = [entry] + [item for item in previous if item.get('tag_name') != tag]
@@ -232,6 +238,6 @@ if __name__ == '__main__':
         if args.from_github:
             fetch_github(args.tag, args.assets_dir)
         publish(args.tag, args.assets_dir, token)
-    except (RuntimeError, ValueError, OSError, requests.RequestException) as exc:
+    except (RuntimeError, ValueError, TypeError, KeyError, OSError, requests.RequestException) as exc:
         print('Gitee publication failed: ' + (str(exc) if isinstance(exc, (RuntimeError, ValueError)) else type(exc).__name__), file=sys.stderr)
         sys.exit(1)

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from app.updates import (DEFAULT_SOURCE, MANIFEST_START, MANIFEST_END,
                          decode_release_feed, find_update, valid_download_url)
@@ -76,6 +77,42 @@ class UpdateSourceTests(unittest.TestCase):
             self.assertTrue(all(p.stat().st_size <= 17 for p in parts))
             self.assertEqual(b''.join(p.read_bytes() for p in parts), data)
             self.assertEqual(publisher.digest(original), 'sha256:' + hashlib.sha256(data).hexdigest())
+
+    def test_gitee_required_release_fields_and_missing_feed_array(self):
+        calls = []
+
+        class FakeGitee:
+            def __init__(self, token):
+                pass
+
+            def api(self, method, suffix, payload=None, **kwargs):
+                calls.append((method, suffix, payload))
+                if suffix.startswith('/releases/tags/'):
+                    return {'id': 1}
+                if suffix.endswith('/attach_files'):
+                    return []
+                if method == 'PATCH':
+                    assert payload['tag_name'] == payload['name'] == 'beta0.1.4'
+                if method == 'GET' and suffix == '/contents/releases.json':
+                    return []  # Actual Gitee missing-path response.
+                return None
+
+            def upload(self, release_id, path, existing):
+                return {'url': 'https://gitee.com/attachments/download/1/' + path.name,
+                        'digest': publisher.digest(path), 'size': path.stat().st_size}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / '更新日志.txt').write_text('beta0.1.4（2026-10-30）\nTest release\n', encoding='utf-8')
+            files = root / 'assets'
+            files.mkdir()
+            (files / 'beta0.1.4.zip').write_bytes(b'portable')
+            with patch.object(publisher, 'ROOT', root), patch.object(publisher, 'Gitee', FakeGitee):
+                publisher.publish('beta0.1.4', files, 'test-only')
+            self.assertTrue(any(method == 'POST' and path == '/branches' for method, path, _ in calls))
+            posted = next(payload for method, path, payload in calls if method == 'POST' and path == '/contents/releases.json')
+            feed = json.loads(base64.b64decode(posted['content']))
+            self.assertEqual(find_update(feed, 'beta0.1.3', 'gitee').tag, 'beta0.1.4')
 
 
 if __name__ == '__main__':
