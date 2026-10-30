@@ -66,6 +66,8 @@ Gitee 单个附件上限为 100MB，超限包会分成多个附件。客户端�
 
 同步 Gitee：先把同一源码分支和标签推送到 `gitee` 远端，等待 GitHub Actions 成功，再运行 `python packaging/publish_gitee.py --tag betaX.Y.Z --assets-dir dist/gitee-betaX.Y.Z --from-github`。脚本从 GitHub 下载已校验的同一批完整包和差异包，按需要拆分，上传到 Gitee，并以匿名下载校验确认可用后更新 Gitee 的 `update-feed` 清单。令牌只从隐藏提示或发布机的 `GITEE_TOKEN` 环境变量读取；不写入源码、客户端或更新清单。
 
+当前 Gitee 普通仓库不支持 LFS 上传，源码镜像保留 `libmpv` 的 LFS 指针；推送镜像时使用 `GIT_LFS_SKIP_PUSH=1`。从 Gitee 获取源码时可设置 `GIT_LFS_SKIP_SMUDGE=1` 后克隆，再将已下载便携包中的 `_internal/libmpv/libmpv-2.dll` 复制到源码的 `libmpv/libmpv-2.dll`。便携客户端和差异更新均包含实际 DLL，不受源码镜像的 LFS 限制影响。
+
 同版本修订会更新同名 Release 文件，但现有客户端只识别版本号更高的更新。已经安装该版本的用户需手动下载新的完整 ZIP；换目录安装时，请自行保留原目录的 `config.json` 与 `stickers`。
 
 客户端把启动环境、关键操作、异常与更新脚本步骤写入 EXE 同目录的 `crash.log`（每文件 2 MB，保留 3 份历史）；Python 原生故障堆栈写入 `fatal.log`。目录不可写时，日志写入 `%LOCALAPPDATA%\WatchingTogether\logs`。日志不会自动上传，不记录昵称、房间邀请、聊天、媒体路径或账号 Cookie。反馈问题时可提供对应时间段的日志；分享前仍应检查日志中的异常堆栈是否含个人路径。
