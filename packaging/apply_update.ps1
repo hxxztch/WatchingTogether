@@ -4,6 +4,7 @@
     [Parameter(Mandatory=$true)][string]$FromVersion,
     [Parameter(Mandatory=$true)][string]$ToVersion,
     [int]$TargetProcessId = 0,
+    [ValidateRange(1, 90)][int]$ExitWaitSeconds = 90,
     [switch]$NoRestart
 )
 $ErrorActionPreference = 'Stop'
@@ -51,18 +52,43 @@ function Check-Hash([string]$path, [string]$expected) {
     if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA256 mismatch: $path" }
 }
 
+function Wait-ClientExit([int]$processId, [int]$seconds) {
+    if ($processId -eq $PID) { throw 'Cannot wait for the updater itself' }
+    $client = $null
+    try {
+        $client = [Diagnostics.Process]::GetProcessById($processId)
+    } catch [ArgumentException] {
+        Write-UpdateLog "client already exited process=$processId"
+        return
+    }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        Write-UpdateLog "waiting for client process=$processId timeout_seconds=$seconds"
+        # Wait on this process object's exit state. A fresh PID lookup after
+        # Wait-Process is neither an exit check nor safe against PID reuse.
+        # Access/handle errors must reach the log instead of being silenced.
+        if (-not $client.WaitForExit($seconds * 1000)) {
+            throw "Client exit timed out after $seconds seconds; no application files changed"
+        }
+        Write-UpdateLog "client exit confirmed process=$processId elapsed_ms=$($watch.ElapsedMilliseconds)"
+    } finally {
+        $client.Dispose()
+    }
+}
+
 $backup = Join-Path $tempRoot 'backup'
 $stage = Join-Path $tempRoot 'stage'
 New-Item -ItemType Directory -Path $backup, $stage | Out-Null
 $committed = $false
 $archive = $null
+$phase = 'waiting_for_exit'
+$clientExited = $TargetProcessId -le 0
 try {
     if ($TargetProcessId -gt 0) {
-        Wait-Process -Id $TargetProcessId -Timeout 90 -ErrorAction SilentlyContinue
-        if (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue) {
-            throw 'Client did not exit before update'
-        }
+        Wait-ClientExit $TargetProcessId $ExitWaitSeconds
+        $clientExited = $true
     }
+    $phase = 'reading_manifest'
     $archive = [IO.Compression.ZipFile]::OpenRead([IO.Path]::GetFullPath($DeltaZip))
     $manifestEntry = $archive.GetEntry('manifest.json')
     if ($null -eq $manifestEntry) { throw 'Missing update manifest' }
@@ -73,6 +99,7 @@ try {
     Write-UpdateLog "manifest verified changed=$(@($manifest.files).Count) removed=$(@($manifest.removed).Count)"
     $affected = @($manifest.files) + @($manifest.removed)
     $seen = @{}
+    $phase = 'validating_files'
     foreach ($item in $affected) {
         $relative = [string]$item.path
         if ($seen.ContainsKey($relative)) { throw "Duplicate update path: $relative" }
@@ -87,6 +114,7 @@ try {
             Copy-Item -LiteralPath $target -Destination $saved
         }
     }
+    $phase = 'staging_files'
     foreach ($item in $manifest.files) {
         $relative = [string]$item.path
         $entry = $archive.GetEntry('files/' + $relative)
@@ -99,6 +127,7 @@ try {
         Check-Hash $staged ([string]$item.sha256)
     }
     try {
+        $phase = 'committing_files'
         foreach ($item in $manifest.files) {
             $target = Safe-Target ([string]$item.path)
             $staged = Join-Path $stage (([string]$item.path) -replace '/', '\')
@@ -125,20 +154,30 @@ try {
         }
     }
     if (-not $NoRestart) {
+        $phase = 'restarting'
         $newExe = Safe-Target ('超时空会夜机' + $ToVersion + '.exe')
         if (-not (Test-Path -LiteralPath $newExe -PathType Leaf)) { throw 'Updated EXE missing' }
         Start-Process -FilePath $newExe -WorkingDirectory $installRoot
     }
 } catch {
-    Write-UpdateLog "failed type=$($_.Exception.GetType().Name) message=$($_.Exception.Message)"
+    $detail = $_.Exception
+    while ($null -ne $detail.InnerException) { $detail = $detail.InnerException }
+    Write-UpdateLog "failed phase=$phase type=$($detail.GetType().Name) message=$($detail.Message)"
     if (-not $NoRestart) {
         $oldExe = Safe-Target ('超时空会夜机' + $FromVersion + '.exe')
-        if (Test-Path -LiteralPath $oldExe -PathType Leaf) {
+        if ($clientExited -and -not $committed -and (Test-Path -LiteralPath $oldExe -PathType Leaf)) {
             Start-Process -FilePath $oldExe -WorkingDirectory $installRoot
+        }
+        $message = if ($committed) {
+            '更新文件已安装，但新版本未能自动启动。请在原目录手动打开新版客户端。详细原因已记录在 crash.log。'
+        } elseif (-not $clientExited) {
+            '旧客户端未能正常退出，尚未修改程序文件。请关闭所有旧客户端窗口及后台进程后再升级；旧版本无法退出时，可改用完整便携包并保留 config.json 和 stickers。详细原因已记录在 crash.log。'
+        } else {
+            '更新未完成，已尝试恢复原程序文件。详细原因已记录在 crash.log；请检查日志或使用完整便携包升级，保留 config.json 和 stickers。'
         }
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show(
-            '更新失败，已保留原有文件。请在设置页重新检查更新。',
+            $message,
             '超时空会夜机') | Out-Null
     }
     throw

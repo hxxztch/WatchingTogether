@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -97,6 +98,87 @@ class UpdateTests(unittest.TestCase):
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertEqual((tampered / "change.txt").read_text(), "user edit")
                 self.assertFalse((tampered / "add.txt").exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows updater process waiting')
+    def test_waits_for_client_exit_before_replacing_files(self):
+        self._check_process_wait('delayed')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows updater process waiting')
+    def test_already_exited_client_does_not_block_install(self):
+        self._check_process_wait('gone')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows updater process waiting')
+    def test_wait_timeout_keeps_client_and_configuration_untouched(self):
+        self._check_process_wait('timeout')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows repair updater')
+    def test_repair_helper_rejects_unverified_zip_before_changing_files(self):
+        with tempfile.TemporaryDirectory(prefix='wt-repair-reject-') as temporary:
+            root = Path(temporary)
+            exe = root / '超时空会夜机beta0.1.2.exe'
+            exe.write_bytes(b'original-exe-sentinel')
+            personal = root / 'config.json'
+            personal.write_bytes(b'{"nickname":"keep-me"}')
+            delta = root / 'untrusted.delta.zip'
+            delta.write_bytes(b'not-a-published-delta')
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
+                '-File', str(ROOT / 'packaging/repair_update.ps1'), '-ClientExe', str(exe),
+                '-DeltaZip', str(delta), '-NoRestart'], capture_output=True, text=True,
+                encoding='utf-8', errors='replace', timeout=15)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('SHA256', result.stderr)
+            self.assertEqual(exe.read_bytes(), b'original-exe-sentinel')
+            self.assertEqual(personal.read_bytes(), b'{"nickname":"keep-me"}')
+            self.assertFalse((root / 'crash.log').exists())
+
+    def _check_process_wait(self, mode):
+        with tempfile.TemporaryDirectory(prefix='wt-updater-wait-') as temporary:
+            root = Path(temporary)
+            old_zip, new_zip, delta = root / 'old.zip', root / 'new.zip', root / 'delta.zip'
+            for path, value in ((old_zip, b'old'), (new_zip, b'new')):
+                with zipfile.ZipFile(path, 'w') as archive:
+                    archive.writestr('client/change.txt', value)
+            make_delta.create_delta(old_zip, new_zip, 'beta0.1.3', 'beta0.1.4', delta)
+            install = root / 'installed'
+            install.mkdir()
+            (install / 'change.txt').write_bytes(b'old')
+            configuration = b'{"nickname":"preserved","bili_cookie":"test-only"}'
+            (install / 'config.json').write_bytes(configuration)
+            client = None
+            target_pid = 2147483647  # Deliberately nonexistent Windows PID.
+            try:
+                if mode != 'gone':
+                    client = subprocess.Popen([getattr(sys, '_base_executable', sys.executable),
+                        '-c', 'import time; time.sleep(' + ('2' if mode == 'delayed' else '30') + ')'],
+                        creationflags=subprocess.CREATE_NO_WINDOW)
+                    target_pid = client.pid
+                started = time.monotonic()
+                result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                    '-File', str(ROOT / 'packaging/apply_update.ps1'), '-InstallDir', str(install),
+                    '-DeltaZip', str(delta), '-FromVersion', 'beta0.1.3', '-ToVersion', 'beta0.1.4',
+                    '-TargetProcessId', str(target_pid), '-ExitWaitSeconds', '1' if mode == 'timeout' else '5',
+                    '-NoRestart'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15)
+                log = (install / 'crash.log').read_text(encoding='utf-8')
+                self.assertEqual((install / 'config.json').read_bytes(), configuration)
+                if mode == 'timeout':
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIsNone(client.poll(), 'Updater must never kill the client')
+                    self.assertEqual((install / 'change.txt').read_bytes(), b'old')
+                    self.assertIn('phase=waiting_for_exit', log)
+                    self.assertIn('Client exit timed out', log)
+                    self.assertNotIn('manifest verified', log)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual((install / 'change.txt').read_bytes(), b'new')
+                    self.assertIn('client exit confirmed' if mode == 'delayed' else 'client already exited', log)
+                    if client:
+                        self.assertIsNotNone(client.poll())
+                        self.assertGreater(time.monotonic() - started, 1)
+            finally:
+                if client:
+                    if client.poll() is None:
+                        client.terminate()
+                    client.wait(timeout=5)
 
 
 if __name__ == "__main__":
