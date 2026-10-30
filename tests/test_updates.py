@@ -69,6 +69,8 @@ class UpdateTests(unittest.TestCase):
                 (install / "remove.txt").write_text("remove")
                 (install / 'stickers').mkdir()
                 (install / 'stickers/custom.png').write_bytes(b'personal image')
+                personal_config = b'{"nickname":"User","bili_cookie":"test-only","update_source":"gitee"}'
+                (install / 'config.json').write_bytes(personal_config)
                 result = subprocess.run([
                     "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                     str(ROOT / "packaging/apply_update.ps1"), "-InstallDir", str(install),
@@ -81,6 +83,7 @@ class UpdateTests(unittest.TestCase):
                 self.assertFalse((install / "remove.txt").exists())
                 self.assertEqual((install / "same.txt").read_text(), "same")
                 self.assertEqual((install / 'stickers/custom.png').read_bytes(), b'personal image')
+                self.assertEqual((install / 'config.json').read_bytes(), personal_config)
                 tampered = root / "tampered"
                 tampered.mkdir()
                 (tampered / "change.txt").write_text("user edit")

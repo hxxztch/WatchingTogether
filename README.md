@@ -56,11 +56,15 @@ pip install -r requirements.txt
 
 ### 客户端更新与自动发布
 
-便携版启动后会从 [静态发布清单](https://raw.githubusercontent.com/hxxztch/WatchingTogether/update-feed/releases.json) 检查同一 beta 通道的新版本；静态清单不可用时回退 GitHub Releases API。侧边栏底部的「设置」可查看当前版本、手动检查、查看差异文件和下载更新。发布页提供完整便携包 `betaX.Y.Z.zip`；压缩包仍只有一个顶层目录，里面是 EXE、`_internal` 和说明文件。新版同时提供从各旧 beta 版本升级的 `旧版-to-新版.delta.zip` 和对应 `.delta.json` 文件清单。便携版优先自动下载适用的差异包，用户点击「安装更新并重启」后才会替换文件；个人 `config.json` 和诊断日志不在更新范围内。若找不到适用的差异包，可手动下载完整 ZIP。源码运行时仅检查更新并提供完整便携包下载，不改动 Git 工作区。
+便携版启动后检查同一 beta 通道的新版本。「设置 → 更新源」默认选择 **Gitee**，也可切换到 **GitHub**；选择自动保存到个人配置。两种来源分别读取各自的静态清单，失败时使用同一平台的 Releases API，不会自动切到另一平台。设置页可手动检查、查看差异文件和下载更新。发布页提供完整便携包 `betaX.Y.Z.zip`；压缩包仍只有一个顶层目录，里面是 EXE、`_internal` 和说明文件。新版同时提供从各旧 beta 版本升级的 `旧版-to-新版.delta.zip` 和对应 `.delta.json` 文件清单。便携版优先自动下载适用的差异包，用户点击「安装更新并重启」后才会替换文件；个人 `config.json`、`stickers` 和诊断日志均保留。若找不到适用的差异包，可下载完整 ZIP。源码运行时仅检查更新并提供完整便携包下载，不改动 Git 工作区。
+
+Gitee 单个附件上限为 100MB，超限包会分成多个附件。客户端会自动逐段下载、合并并校验每段及整个 ZIP 的 SHA256；手动下载完整包时，把所有分段和发行页提供的 `merge-betaX.Y.Z.cmd` 放到同一目录运行，再解压得到的完整 ZIP。无需安装额外工具。
 
 2026-10-23 修订的 beta0.1.1 修复了 GitHub Release 文件跳转导致的下载校验失败。此前下载的 beta0.1.1 包需要手动替换一次：解压发布页的新版完整 ZIP，关闭旧客户端后将旧 EXE 同目录的 `config.json` 复制到新 EXE 目录。修订版随后可用差异包升级到 beta0.1.2。
 
 发布新 beta 时，先修改 `app/version.py` 中的 `CLIENT_VERSION`，提交并推送代码，再推送同名标签。[GitHub Actions](.github/workflows/release-beta.yml) 会在 Windows 上安装 `packaging/requirements-lock.txt`、构建并校验便携包、生成完整 ZIP 与差异包，创建 Release 后更新静态发布清单。无需手工打包或上传文件。只有标签名与代码版本一致时才会发布。
+
+同步 Gitee：先把同一源码分支和标签推送到 `gitee` 远端，等待 GitHub Actions 成功，再运行 `python packaging/publish_gitee.py --tag betaX.Y.Z --assets-dir dist/gitee-betaX.Y.Z --from-github`。脚本从 GitHub 下载已校验的同一批完整包和差异包，按需要拆分，上传到 Gitee，并以匿名下载校验确认可用后更新 Gitee 的 `update-feed` 清单。令牌只从隐藏提示或发布机的 `GITEE_TOKEN` 环境变量读取；不写入源码、客户端或更新清单。
 
 同版本修订会更新同名 Release 文件，但现有客户端只识别版本号更高的更新。已经安装该版本的用户需手动下载新的完整 ZIP；换目录安装时，请自行保留原目录的 `config.json` 与 `stickers`。
 
