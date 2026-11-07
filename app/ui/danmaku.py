@@ -71,9 +71,9 @@ class DanmakuOverlay(QWidget):
         font = QFont("Microsoft YaHei", 14, QFont.Bold)
         label.setFont(font)
         if image:
-            from app.ui.chat_images import image_pixmap
+            from app.ui.gif_images import set_label_image
             try:
-                label.setPixmap(image_pixmap(image, 64))
+                set_label_image(label, image, 64)
             except ValueError:
                 label.deleteLater()
                 return

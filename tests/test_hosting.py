@@ -54,6 +54,35 @@ class HostingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay['seq'], event['seq'])
         self.assertEqual(replay['image'], image)
 
+    async def test_gif_delivery_and_resume_with_legacy_png_fallback(self):
+        import base64
+        from io import BytesIO
+        from PIL import Image
+        from app.ui.gif_images import prepare_gif
+        buffer = BytesIO()
+        Image.new('RGB', (4, 4), 'red').save(buffer, format='GIF', save_all=True,
+            append_images=[Image.new('RGB', (4, 4), 'blue')], duration=80, loop=0)
+        animation = prepare_gif(buffer.getvalue())
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhWQAAAAASUVORK5CYII='
+        owner = await self.socket(self.host.host_path)
+        await send(owner, 'create_room', name='owner', protocol=2)
+        room = await receive(owner, 'room_created')
+        self.assertTrue(room['chat_gifs'])
+        guest = await self.socket(self.host.guest_path)
+        await send(guest, 'join_room', name='guest', room=room['room'], protocol=2)
+        joined = await receive(guest, 'room_joined')
+        await send(owner, 'chat', message='[图片]', image=image, animation=animation, id='gif')
+        delivered = await receive(guest, 'chat')
+        self.assertEqual(delivered['animation'], animation)
+        self.assertEqual(delivered['image'], image)
+        await guest.close()
+        resumed = await self.socket(self.host.guest_path)
+        await send(resumed, 'resume_room', room=room['room'], token=joined['token'], chat_seq=0)
+        await receive(resumed, 'room_joined')
+        self.assertEqual((await receive(resumed, 'chat'))['animation'], animation)
+        await send(owner, 'chat', message='bad', image=image, animation=image)
+        await receive(owner, 'error')
+
     async def asyncSetUp(self):
         self.host = EmbeddedHost()
         self.host.start()

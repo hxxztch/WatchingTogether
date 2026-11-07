@@ -253,7 +253,7 @@ class Server:
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
                                    "room": room.code, "name": member.name,
                                    "token": member.token, "protocol": 2,
-                                   "chat_seq": cursor, "chat_images": True,
+                                   "chat_seq": cursor, "chat_images": True, "chat_gifs": True,
                                    "resumed": mtype == "resume_room", "members": room.member_names,
                                    "state": room.snapshot()})
                         if mtype == "resume_room":
@@ -292,11 +292,21 @@ class Server:
                         if picture is not None:
                             from app.chat_media import image_bytes
                             image_bytes(picture)
+                        animation = msg.get('animation')
+                        if animation is not None:
+                            from app.chat_media import image_bytes
+                            if picture is None or not image_bytes(animation).startswith((b'GIF87a', b'GIF89a')):
+                                raise ValueError('Invalid GIF attachment')
                         room.chat_seq += 1
                         event = {"type": "chat", "from": member.name,
                                  "message": message, "id": message_id, "seq": room.chat_seq}
                         if picture is not None:
                             event['image'] = picture
+                        if animation is not None:
+                            event['animation'] = animation
+                        if len(json.dumps(event, ensure_ascii=False).encode('utf-8')) > 64000:
+                            room.chat_seq -= 1
+                            raise ValueError('Image message is too large')
                         room.history.append((member.token, event))
                         self.broadcast(room, event, exclude=member)
                     elif mtype == "load":

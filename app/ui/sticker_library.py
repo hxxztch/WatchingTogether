@@ -4,9 +4,12 @@ import json
 import re
 import uuid
 import zipfile
+import threading
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 from app.chat_media import image_bytes
+
+_LIBRARY_LOCK = threading.RLock()
 
 
 def read_library():
@@ -23,8 +26,8 @@ def read_library():
     entries = saved.get('items', {})
     entries = entries if isinstance(entries, dict) else {}
     items = {}
-    for path in sorted(directory.glob('*.png'))[:300]:
-        if not re.fullmatch(r'[a-f0-9]{64}\.png', path.name):
+    for path in sorted(list(directory.glob('*.png')) + list(directory.glob('*.gif')))[:300]:
+        if not re.fullmatch(r'[a-f0-9]{64}\.(png|gif)', path.name):
             continue
         item = entries.get(path.name, {})
         item = item if isinstance(item, dict) else {}
@@ -47,6 +50,43 @@ def save_library(data):
             temporary.unlink()
 
 
+def favorite_image(value):
+    """Save the received payload unchanged in Custom, retaining GIF animation."""
+    from app.ui.chat_images import library_dir
+    raw = image_bytes(value)
+    if not _LIBRARY_LOCK.acquire(blocking=False):
+        raise ValueError('正在导入表情，请等待导入完成后再收藏。')
+    try:
+        directory = library_dir()
+        data = read_library()
+        # Also recognize older flat-library filenames and preserve renamed entries.
+        for filename, entry in data['items'].items():
+            if entry['group'] == 'custom' and (directory / filename).read_bytes() == raw:
+                return False
+        if len(data['items']) >= 300:
+            raise ValueError('表情库最多保存 300 张，请先删除不用的表情。')
+        directory.mkdir(parents=True, exist_ok=True)
+        animated = raw.startswith((b'GIF87a', b'GIF89a'))
+        key = hashlib.sha256(b'custom' + raw).hexdigest() + ('.gif' if animated else '.png')
+        temporary = directory / ('favorite-' + uuid.uuid4().hex + '.tmp')
+        destination = directory / key
+        try:
+            temporary.write_bytes(raw)
+            temporary.replace(destination)
+            data['items'][key] = {'name': '收藏动画' if animated else '收藏表情', 'group': 'custom'}
+            try:
+                save_library(data)
+            except OSError:
+                destination.unlink()
+                raise
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return True
+    finally:
+        _LIBRARY_LOCK.release()
+
+
 class ImportImages(QThread):
     completed = Signal(int, int, str)
 
@@ -57,6 +97,10 @@ class ImportImages(QThread):
         self.group = 'custom'
 
     def run(self):
+        with _LIBRARY_LOCK:
+            self._import_images()
+
+    def _import_images(self):
         from app.ui.chat_images import prepare_image, library_dir, EXTENSIONS
         count = failed = used = total = 0
         error = ''
@@ -76,7 +120,8 @@ class ImportImages(QThread):
                 try:
                     data = image_bytes(prepare_image(raw))
                     # Deduplicate within a collection; the same image may belong to multiple packs.
-                    key = hashlib.sha256(group.encode() + data).hexdigest() + '.png'
+                    suffix = '.gif' if data.startswith((b'GIF87a', b'GIF89a')) else '.png'
+                    key = hashlib.sha256(group.encode() + data).hexdigest() + suffix
                     if key not in metadata['items']:
                         (directory / key).write_bytes(data)
                         metadata['items'][key] = {'name': name[:60], 'group': group}

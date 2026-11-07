@@ -21,7 +21,7 @@ def run(report_path, server_url=None):
         from yt_dlp.extractor import gen_extractor_classes
         from PySide6.QtCore import Qt, QEvent
         from PySide6.QtGui import QKeyEvent
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QLabel
         from app.player import mpv
         from app.ui.main_window import MainWindow
         from app.bili_login import LoginSession
@@ -126,6 +126,26 @@ def run(report_path, server_url=None):
                     guest._controls._bar_danmaku_toggle.setChecked(True)
                     assert not guest._danmaku._labels
                     result['checks'].append('bundled image decoder and emoji picker; image chat; danmaku clear/no replay')
+                    if host._chat_gifs_supported:
+                        from io import BytesIO
+                        from PIL import Image
+                        output = BytesIO()
+                        Image.new('RGB', (32, 32), 'red').save(output, format='GIF',
+                            save_all=True, append_images=[Image.new('RGB', (32, 32), 'blue')],
+                            duration=80, loop=0)
+                        animation = prepare_image(output.getvalue())
+                        host._on_chat_image(animation)
+                        wait_for(lambda: guest._room_panel._chat_list.count() == 3)
+                        row = guest._room_panel._chat_list.itemWidget(guest._room_panel._chat_list.item(2))
+                        picture = next(label for label in row.findChildren(QLabel) if label.movie())
+                        frames = []
+                        picture.movie().frameChanged.connect(frames.append)
+                        wait_for(lambda: 1 in frames)
+                        guest._room_panel._favorite_chat_image(animation)
+                        from app.ui.sticker_library import read_library
+                        assert any(key.endswith('.gif') and entry['group'] == 'custom'
+                                   for key, entry in read_library()['items'].items())
+                        result['checks'].append('bundled Pillow GIF encoder and Qt animated decoder; room delivery and local favorites')
                 controls.set_position(0, 20)
                 controls._time_editor.setText('00:04')
                 controls._submit_time()

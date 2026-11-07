@@ -1,5 +1,6 @@
 altgraph==0.17.5
 pip==25.0.1
+Pillow==10.4.0
 setuptools==75.3.4
 brotli==1.2.0
 certifi==2026.7.22

@@ -1,10 +1,10 @@
 ﻿"""Room panel UI - create and join watching rooms."""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QLabel, QListWidget, QListWidgetItem, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication, QSizePolicy,
+    QLabel, QListWidget, QListWidgetItem, QListView, QStackedWidget, QMessageBox, QComboBox, QApplication, QSizePolicy, QMenu,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QMovie
 from app.config import load as _cfg_load, save as _cfg_save
 import os as _os, sys as _sys
 
@@ -24,6 +24,7 @@ class RoomPanel(QWidget):
     leave_requested = Signal()
     chat_message = Signal(str)
     emoji_requested = Signal()
+    sticker_added = Signal()
     refresh_connection = Signal(str)
     cancel_requested = Signal()
 
@@ -169,7 +170,10 @@ class RoomPanel(QWidget):
         self._member_list = QListWidget(self)
         self._member_list.hide()  # Shared membership model for Rooms and the details dialog.
         self._chat_list = QListWidget()
+        self._chat_list.setObjectName('chatMessages')
+        self._chat_list.setStyleSheet('QListWidget#chatMessages::item { padding: 0px; }')
         self._chat_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self._chat_list.setVerticalScrollMode(QListView.ScrollPerPixel)
         self._chat_list.setWordWrap(True)
         self._chat_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._chat_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -366,6 +370,9 @@ class RoomPanel(QWidget):
         self._update_member_summary()
 
     def add_chat(self, sender: str, msg: str, image=None):
+        scrollbar = self._chat_list.verticalScrollBar()
+        previous_scroll = scrollbar.value()
+        follow_latest = previous_scroll >= scrollbar.maximum() - 2
         if image:
             from app.ui.chat_images import image_pixmap
             try:
@@ -378,24 +385,72 @@ class RoomPanel(QWidget):
                 widget = QWidget()
                 layout = QVBoxLayout(widget)
                 layout.setContentsMargins(4, 4, 4, 4)
+                layout.setSpacing(4)
                 title = QLabel(f'[{sender}] {msg}')
                 title.setTextFormat(Qt.PlainText)
                 title.setWordWrap(True)
                 layout.addWidget(title)
                 picture = QLabel()
-                picture.setPixmap(pixmap)
+                from app.ui.gif_images import set_label_image
+                set_label_image(picture, image, 112)
+                picture.setToolTip('右键添加到 ❤️ 收藏表情')
+                picture.setContextMenuPolicy(Qt.CustomContextMenu)
+                picture.customContextMenuRequested.connect(
+                    lambda point, target=picture, value=image: self._image_context_menu(target, point, value))
                 layout.addWidget(picture)
                 item.setSizeHint(widget.sizeHint())
                 self._chat_list.addItem(item)
                 self._chat_list.setItemWidget(item, widget)
+                # Keep older messages visible without running unlimited decoders.
+                movies = []
+                for index in range(self._chat_list.count()):
+                    row = self._chat_list.itemWidget(self._chat_list.item(index))
+                    if row:
+                        for label in row.findChildren(QLabel):
+                            if label.movie() and label.movie().state() == QMovie.MovieState.Running:
+                                movies.append(label.movie())
+                for movie in movies[:-10]:
+                    movie.stop()
+                    movie.jumpToFrame(0)
                 images = [i for i in range(self._chat_list.count()) if self._chat_list.item(i).data(Qt.UserRole) == 'image']
                 if len(images) > 100:
-                    self._chat_list.takeItem(images[0])
+                    self._remove_chat_item(images[0])
         else:
             self._chat_list.addItem(f"[{sender}] {msg}")
         while self._chat_list.count() > 1000:
-            self._chat_list.takeItem(0)
-        self._chat_list.scrollToBottom()
+            self._remove_chat_item(0)
+        if follow_latest:
+            self._chat_list.scrollToBottom()
+        else:
+            scrollbar.setValue(previous_scroll)
+
+    def _image_context_menu(self, picture, point, image):
+        menu = QMenu(self)
+        action = menu.addAction('添加到表情')
+        action.triggered.connect(lambda: self._favorite_chat_image(image))
+        try:
+            menu.exec(picture.mapToGlobal(point))
+        finally:
+            menu.deleteLater()
+
+    def _favorite_chat_image(self, image):
+        from app.ui.sticker_library import favorite_image
+        try:
+            added = favorite_image(image)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, '收藏表情失败', str(exc))
+            return
+        self.sticker_added.emit()
+        self.set_status('已添加到 ❤️ 收藏表情。' if added else '❤️ 收藏中已有此表情。', '#4CAF50')
+
+    def _remove_chat_item(self, index):
+        item = self._chat_list.item(index)
+        widget = self._chat_list.itemWidget(item)
+        if widget:
+            self._chat_list.removeItemWidget(item)
+            widget.hide()
+            widget.deleteLater()
+        self._chat_list.takeItem(index)
 
     def set_status(self, text: str, color: str = "#999"):
         self._status.setText(text)

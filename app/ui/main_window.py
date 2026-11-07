@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         self._danmaku = DanmakuOverlay(self)
         self._controls.danmaku_visibility_changed.connect(self._danmaku.set_enabled)
         self._chat_images_supported = False
+        self._chat_gifs_supported = False
         self._danmaku.track(self._player)
 
         self._hotkey.connect(self._on_hotkey)
@@ -199,6 +200,7 @@ class MainWindow(QMainWindow):
         empty_layout.addLayout(open_row)
         empty_layout.addStretch()
         self._shell = DesktopShell(self, center)
+        self._room_panel.sticker_added.connect(self._refresh_sticker_library)
         self._shell.page_requested.connect(self._switch_page)
         self.setCentralWidget(self._shell)
 
@@ -328,6 +330,7 @@ class MainWindow(QMainWindow):
         try:
             if mtype in ("room_created", "room_joined"):
                 self._chat_images_supported = bool(msg.get('chat_images'))
+                self._chat_gifs_supported = bool(msg.get('chat_gifs'))
                 self._room_code = msg["room"]
                 self._room_ready = True
                 self._playback_sync = PlaybackSynchronizer()
@@ -376,8 +379,9 @@ class MainWindow(QMainWindow):
                 pos = msg.get("position", 0)
                 self._player.seek(pos)
             elif mtype == "chat":
-                self._room_panel.add_chat(msg.get("from", ""), msg.get("message", ""), msg.get('image'))
-                self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""), msg.get('image'))
+                picture = msg.get('animation') or msg.get('image')
+                self._room_panel.add_chat(msg.get("from", ""), msg.get("message", ""), picture)
+                self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""), picture)
             elif mtype == "sync_state":
                 if msg.get("room", self._room_code) == self._room_code:
                     self._apply_room_state(msg.get("state", {}))
@@ -499,6 +503,11 @@ class MainWindow(QMainWindow):
         dialog.move(x, y)
         dialog.show()
 
+    def _refresh_sticker_library(self):
+        manager = self._shell.sticker_manager
+        manager.browser.reload()
+        manager.update_actions()
+
     def _on_chat_image(self, image):
         if not self._room_ready:
             QMessageBox.information(self, '发送图片', '请先加入房间并等待连接恢复。')
@@ -506,12 +515,22 @@ class MainWindow(QMainWindow):
         if not self._chat_images_supported:
             QMessageBox.information(self, '发送图片', '此服务器尚不支持图片，请使用 beta0.1.3 或更新版本的房主创建房间。')
             return
-        from app.ui.chat_images import image_pixmap
+        from app.ui.chat_images import image_pixmap, prepare_image
+        from app.chat_media import image_bytes
         try:
             image_pixmap(image)
         except ValueError:
             return
-        self._network.send({'type': 'chat', 'message': '[图片]', 'image': image})
+        raw = image_bytes(image)
+        payload = {'type': 'chat', 'message': '[图片]', 'image': image}
+        if raw.startswith((b'GIF87a', b'GIF89a')):
+            payload['image'] = prepare_image(raw, animate=False)
+            if self._chat_gifs_supported:
+                payload['animation'] = image
+            else:
+                image = payload['image']
+                self._room_panel.set_status('此服务器暂不支持 GIF 动画，已按静态首帧发送。')
+        self._network.send(payload)
         self._room_panel.add_chat('我', '[图片]', image)
         self._danmaku.show_danmaku('我', '[图片]', image)
 

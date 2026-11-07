@@ -15,7 +15,7 @@ from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import Qt, QTimer, QBuffer, QIODevice, QPoint
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit, QTabBar, QToolButton, QFileDialog
+from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QPushButton, QListView, QLineEdit, QTextEdit, QPlainTextEdit, QTabBar, QToolButton, QFileDialog, QLabel
 from PySide6.QtTest import QTest
 from app.ui.main_window import MainWindow
 from app.ui.chat_images import EmojiPicker, EMOJIS, library_dir, prepare_image
@@ -57,6 +57,9 @@ def main():
             wait(lambda: manager.worker is None)
             assert manager.browser.category.currentData() == 'custom'
             assert manager.list.count() == 1
+            assert [b.text() for b in manager.actions.findChildren(QPushButton)
+                    if '重命名' in b.text()] == ['重命名表情包']
+            assert not manager.rename_button.isEnabled()
             manager.list.setCurrentRow(0)
             key = manager.list.currentItem().data(Qt.UserRole)[2]
             with patch.object(QInputDialog, 'getText', return_value=('改名后的图片', True)):
@@ -68,16 +71,22 @@ def main():
             pack = manager.browser.category.currentData()
             assert pack not in ('custom', 'system')
             assert len(read_library()['items']) == 2
-            with patch.object(QInputDialog, 'getText', return_value=('重新命名的合集', True)):
-                manager.rename_pack_button.click()
-            assert read_library()['packs'][pack] == '重新命名的合集'
+            manager.list.setCurrentRow(0)
+            pack_item = manager.list.currentItem().data(Qt.UserRole)[2]
+            with patch.object(QInputDialog, 'getText', return_value=('重新命名的导入表情', True)) as rename_dialog:
+                manager.rename_button.click()
+            assert rename_dialog.call_args[0][1] == '重命名表情包'
+            assert read_library()['items'][pack_item]['name'] == '重新命名的导入表情'
+            assert manager.list.currentItem().text() == '重新命名的导入表情'
+            assert read_library()['packs'][pack] == '我的外部表情包'
             tabs = manager.browser.category
             assert isinstance(tabs, QTabBar) and tabs.count() == 3
             assert all(not tabs.tabIcon(index).isNull() for index in range(3))
-            assert '重新命名的合集' in tabs.tabToolTip(2)
+            assert '我的外部表情包' in tabs.tabToolTip(2)
             assert tabs.tabIcon(2).pixmap(32, 32).toImage().pixelColor(16, 16).red() > 200
             QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(0).center())
             assert manager.list.count() == len(EMOJIS)
+            assert not manager.rename_button.isEnabled()
             QTest.mouseClick(tabs, Qt.LeftButton, pos=tabs.tabRect(2).center())
             assert manager.list.count() == 1 and tabs.currentData() == pack
             # Legacy flat libraries appear under Custom without reimporting.
@@ -196,6 +205,28 @@ def main():
             window._shell._apply_sidebar()
             window._position_controls()
             QTest.qWait(250)
+            chat = window._room_panel._chat_list
+            for index in range(8):
+                window._room_panel.add_chat('朋友', '[图片]', value)
+            QTest.qWait(100)
+            assert chat.verticalScrollMode() == QListView.ScrollPerPixel
+            def check_chat_layout():
+                viewport = chat.viewport().rect()
+                last = chat.visualItemRect(chat.item(chat.count() - 1))
+                assert abs(last.bottom() - viewport.bottom()) <= 1, (last, viewport)
+                visible_images = 0
+                for index in range(chat.count()):
+                    item = chat.item(index)
+                    if item.data(Qt.UserRole) != 'image':
+                        continue
+                    row = chat.itemWidget(item)
+                    picture = row.findChildren(QLabel)[-1]
+                    assert row.rect().contains(picture.geometry()), (row.rect(), picture.geometry())
+                    rect = chat.visualItemRect(item)
+                    visible_images += viewport.contains(rect)
+                return visible_images
+            expanded_images = check_chat_layout()
+            assert expanded_images >= 1
             before = window._room_panel._chat_list.height()
             composer_bottom = field.mapTo(window._right_content, field.rect().bottomRight()).y()
             assert composer_bottom < window._right_content.height()
@@ -208,6 +239,15 @@ def main():
             QTest.qWait(250)
             after = window._room_panel._chat_list.height()
             assert after > before + 60, (before, after)
+            assert check_chat_layout() > expanded_images
+            chat.verticalScrollBar().setValue(0)
+            window._room_panel.add_chat('朋友', '[图片]', value)
+            QTest.qWait(50)
+            assert chat.verticalScrollBar().value() == 0
+            chat.scrollToBottom()
+            window._room_panel.add_chat('朋友', '[图片]', value)
+            QTest.qWait(50)
+            check_chat_layout()
             assert not window._controls.media_details.isVisible()
             assert window._controls._media_title.isVisible()
             assert window._controls._open_btn.isVisible()
@@ -272,6 +312,29 @@ def main():
             overflow.close()
             print('PASS: categorized persistent imports/rename/delete; emoji inserts in draft; image sends alone; legacy library migrated')
             print('PASS: chat grows on collapse; member details share live model; single bottom toggle; Chinese edit menus; centered room cards')
+            picture.fill(Qt.blue)
+            favorite_buffer = QBuffer()
+            favorite_buffer.open(QIODevice.WriteOnly)
+            assert picture.save(favorite_buffer, 'PNG')
+            favorite = prepare_image(bytes(favorite_buffer.data()))
+            manager.browser.reload('custom')
+            previous_count = manager.list.count()
+            window._room_panel.add_chat('朋友', '[图片]', favorite)
+            window._room_panel._favorite_chat_image(favorite)
+            assert manager.list.count() == previous_count + 1
+            saved = next(entry for entry in read_library()['items'].values()
+                         if entry['name'] == '收藏表情')
+            assert saved['group'] == 'custom'
+            picker = EmojiPicker(window)
+            picker.browser.category.setCurrentIndex(picker.browser.category.findData('custom'))
+            item = next(picker.list.item(index) for index in range(picker.list.count())
+                        if picker.list.item(index).data(Qt.UserRole)[1] == favorite)
+            chosen = []
+            picker.image_chosen.connect(chosen.append)
+            picker.choose(item)
+            assert chosen == [favorite]
+            picker.deleteLater()
+            print('PASS: received image favorites refresh profile immediately and can be sent from heart category')
             manager.start_import([source] * 100, '退出时中断导入')
         finally:
             backend = window._player._player

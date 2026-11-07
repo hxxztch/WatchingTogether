@@ -14,9 +14,15 @@ IMAGE_FILTER = '图片 (*.png *.jpg *.jpeg *.webp *.gif *.bmp)'
 EMOJIS = ['😀', '😂', '🥰', '😎', '😭', '😮', '😡', '🤔', '👍', '👎', '👏', '🙏', '❤️', '🎉', '🍿', '🎬']
 
 
-def prepare_image(raw):
+def prepare_image(raw, animate=True):
     if len(raw) > 8 * 1024 * 1024:
         raise ValueError('原图超过 8 MB，请选择较小的图片。')
+    if animate and raw.startswith((b'GIF87a', b'GIF89a')):
+        from app.ui.gif_images import prepare_gif
+        try:
+            return prepare_gif(raw)
+        except (OSError, EOFError) as exc:
+            raise ValueError('无法读取 GIF 动画。') from exc
     buf = QBuffer()
     buf.setData(QByteArray(raw))
     buf.open(QIODevice.ReadOnly)
@@ -26,7 +32,7 @@ def prepare_image(raw):
     if not size.isValid() or size.width() * size.height() > 16000000:
         raise ValueError('图片无法读取或尺寸超过 1600 万像素。')
     reader.setScaledSize(size.scaled(320, 320, Qt.KeepAspectRatio))
-    picture = reader.read()  # GIF: first frame only, by design.
+    picture = reader.read()
     if picture.isNull():
         raise ValueError('无法解码此图片。')
     for edge in (320, 240, 180, 128, 96, 64):
@@ -42,7 +48,7 @@ def prepare_image(raw):
 
 def image_pixmap(value, edge=160):
     pixmap = QPixmap()
-    pixmap.loadFromData(image_bytes(value), 'PNG')
+    pixmap.loadFromData(image_bytes(value))
     if pixmap.isNull():
         raise ValueError('图片无法解码')
     return pixmap.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -194,7 +200,7 @@ class StickerBrowser(QWidget):
         self.category.blockSignals(True)
         self.category.clear()
         self.category.addItem('系统 emoji · 插入文字', 'system', symbol_icon(EMOJIS[0], font_size=19))
-        self.category.addItem('自定义图片 · 点击直接发送', 'custom', symbol_icon('♥', '#e95068'))
+        self.category.addItem('收藏与自定义表情 · 点击直接发送', 'custom', symbol_icon('♥', '#e95068'))
         for key, name in self.metadata['packs'].items():
             icon = QIcon()
             for filename, entry in self.metadata['items'].items():
@@ -295,7 +301,7 @@ class StickerManager(QWidget):
         self.browser = StickerBrowser()
         self.list = self.browser.list
         layout.addWidget(self.browser)
-        self.note = QLabel('系统 emoji 可与文字一起发送；图片表情单独发送。GIF 使用首帧。\n每次最多导入 100 张，表情库最多 300 张；仅保存在本机。')
+        self.note = QLabel('系统 emoji 可与文字一起发送；图片表情单独发送。支持 GIF 动画（最多80帧、15秒，自动压缩至20KB）。\n每次最多导入 100 张，表情库最多 300 张；仅保存在本机。旧版已导入的GIF需重新导入才能恢复动画。')
         self.note.setWordWrap(True)
         self.note.setTextFormat(Qt.PlainText)
         layout.addWidget(self.note)
@@ -304,15 +310,16 @@ class StickerManager(QWidget):
         rows.setContentsMargins(0, 0, 0, 0)
         for buttons in (
             [('添加自定义图片', self.import_files), ('导入文件夹', self.import_folder), ('导入 ZIP 包', self.import_zip)],
-            [('重命名图片', self.rename), ('重命名表情包', self.rename_pack), ('删除图片', self.remove)],
+            [('重命名表情包', self.rename), ('删除图片', self.remove)],
         ):
             row = QHBoxLayout()
             for title, callback in buttons:
                 button = QPushButton(title)
                 button.clicked.connect(callback)
                 row.addWidget(button)
-                if title == '重命名图片': self.rename_button = button
-                if title == '重命名表情包': self.rename_pack_button = button
+                if title == '重命名表情包':
+                    self.rename_button = button
+                    button.setToolTip('重命名当前选中的自定义或导入表情')
                 if title == '删除图片': self.remove_button = button
             row.addStretch()
             rows.addLayout(row)
@@ -327,7 +334,6 @@ class StickerManager(QWidget):
         editable = bool(item and item.data(Qt.UserRole)[0] == 'image')
         self.rename_button.setEnabled(editable)
         self.remove_button.setEnabled(editable)
-        self.rename_pack_button.setEnabled(self.browser.category.currentData() not in ('system', 'custom'))
 
     def import_files(self):
         paths, _ = QFileDialog.getOpenFileNames(self, '添加自定义图片', '', IMAGE_FILTER)
@@ -370,19 +376,11 @@ class StickerManager(QWidget):
         item = self.list.currentItem()
         if self.worker or not item or item.data(Qt.UserRole)[0] != 'image':
             return
-        name, ok = QInputDialog.getText(self, '重命名图片', '图片名称（最多 60 字）：', text=item.text())
+        name, ok = QInputDialog.getText(self, '重命名表情包', '表情包名称（最多 60 字）：', text=item.text())
         if ok:
             self.save_name(item.data(Qt.UserRole)[2], name)
 
-    def rename_pack(self):
-        group = self.browser.category.currentData()
-        if self.worker or group not in self.browser.metadata['packs']:
-            return
-        name, ok = QInputDialog.getText(self, '重命名表情包', '表情包名称（最多 60 字）：', text=self.browser.metadata['packs'][group])
-        if ok:
-            self.save_name(group, name, pack=True)
-
-    def save_name(self, key, name, pack=False):
+    def save_name(self, key, name):
         if self.worker:
             return False
         name = name.strip()
@@ -391,14 +389,15 @@ class StickerManager(QWidget):
             return False
         data = read_library()
         try:
-            if pack:
-                if key not in data['packs']: return False
-                data['packs'][key] = name
-            else:
-                if key not in data['items']: return False
-                data['items'][key]['name'] = name
+            if key not in data['items']:
+                return False
+            data['items'][key]['name'] = name
             save_library(data)
             self.browser.reload()
+            for index in range(self.list.count()):
+                if self.list.item(index).data(Qt.UserRole)[2] == key:
+                    self.list.setCurrentRow(index)
+                    break
             self.note.setText('名称已保存。')
             return True
         except OSError as exc:

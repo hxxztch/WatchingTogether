@@ -25,12 +25,12 @@ data = [(str(root / 'assets'), 'assets'), (str(helper), 'tools'),
         (str(root / 'packaging/apply_update.ps1'), 'updater'),
         (str(root / 'THIRD-PARTY-CLOUDFLARED.txt'), '.')] + yd_data
 for package in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6',
-                'python-mpv', 'websockets', 'segno'):
+                'python-mpv', 'websockets', 'segno', 'Pillow'):
     data += copy_metadata(package)
 
 a = Analysis([str(root / 'client.py')], pathex=[str(root)],
     binaries=[(str(root / 'libmpv/libmpv-2.dll'), 'libmpv')] + runtime + openssl + yd_bin,
-    datas=data, hiddenimports=yd_hidden + ['websockets.asyncio.client', 'websockets.asyncio.server', 'segno', 'certifi'],
+    datas=data, hiddenimports=yd_hidden + ['websockets.asyncio.client', 'websockets.asyncio.server', 'segno', 'certifi', 'PIL.GifImagePlugin'],
     excludes=['tkinter', 'PyQt5', 'PyQt6', 'numpy', 'scipy', 'pandas', 'matplotlib', 'IPython'],
     noarchive=False, optimize=0)
 pyz = PYZ(a.pure)

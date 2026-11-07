@@ -24,6 +24,9 @@ from app.updates import MANIFEST_START, MANIFEST_END
 from app.version import CLIENT_VERSION
 import app.config as config
 
+_parts = [int(value) for value in CLIENT_VERSION[4:].split('.')]
+NEXT_VERSION = 'beta{}.{}.{}'.format(_parts[0], _parts[1], _parts[2] + 1)
+
 
 def sha(data):
     return 'sha256:' + hashlib.sha256(data).hexdigest()
@@ -37,13 +40,13 @@ def main():
     chunks = (data[:12], data[12:])
     delta = b'only changed files fixture'
     base = 'https://gitee.com/attachments/download/'
-    full = {'name': 'beta0.1.5.zip', 'browser_download_url': base + '1/full.001',
+    full = {'name': NEXT_VERSION + '.zip', 'browser_download_url': base + '1/full.001',
             'digest': sha(data), 'size': len(data),
             'parts': [{'url': base + str(i + 1) + '/full.00' + str(i + 1),
                        'digest': sha(chunk), 'size': len(chunk)} for i, chunk in enumerate(chunks)]}
-    diff = {'name': CLIENT_VERSION + '-to-beta0.1.5.delta.zip',
+    diff = {'name': CLIENT_VERSION + '-to-' + NEXT_VERSION + '.delta.zip',
             'browser_download_url': base + '3/change.delta.zip', 'digest': sha(delta), 'size': len(delta)}
-    release = {'tag_name': 'beta0.1.5', 'html_url': 'https://gitee.com/hxxztch/watching-together/releases/beta0.1.5',
+    release = {'tag_name': NEXT_VERSION, 'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + NEXT_VERSION,
                'assets': [full, diff]}
     state = {'bad': False, 'fail_feed': False}
     calls = []
@@ -58,7 +61,7 @@ def main():
                 content = json.dumps({'encoding': 'base64', 'content': base64.b64encode(json.dumps([release]).encode()).decode()}).encode()
             elif path.endswith('/releases'):
                 body = MANIFEST_START + base64.b64encode(json.dumps(release).encode()).decode() + MANIFEST_END
-                content = json.dumps([{'tag_name': 'beta0.1.5', 'body': body}]).encode()
+                content = json.dumps([{'tag_name': NEXT_VERSION, 'body': body}]).encode()
             elif path.endswith('full.001'):
                 content = chunks[0]
             elif path.endswith('full.002'):

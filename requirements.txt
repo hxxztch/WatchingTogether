@@ -3,3 +3,4 @@ python-mpv>=1.0
 websockets>=13.1
 yt-dlp
 segno
+Pillow>=10.4,<11

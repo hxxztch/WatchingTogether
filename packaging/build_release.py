@@ -72,7 +72,7 @@ def build(components=None):
             shutil.copy2(license_path, package / 'LICENSE_PYTHON.txt')
         distributions = ['websockets'] if component == 'server' else [
             'PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'python-mpv',
-            'websockets', 'yt-dlp', 'segno', 'certifi', 'brotli', 'pycryptodomex', 'requests', 'urllib3', 'mutagen']
+            'websockets', 'yt-dlp', 'segno', 'certifi', 'brotli', 'pycryptodomex', 'requests', 'urllib3', 'mutagen', 'Pillow']
         versions = {'Python': sys.version.split()[0], **{p: metadata.version(p) for p in distributions}}
         (package / '依赖版本.json').write_text(json.dumps(versions, ensure_ascii=False, indent=2), encoding='utf-8')
         notices = ('随包依赖信息及许可证见_internal中的各*.dist-info目录。\n'
@@ -80,6 +80,7 @@ def build(components=None):
                    'mpv: https://mpv.io/ ; python-mpv: https://github.com/jaseg/python-mpv\n'
                    'Python: https://www.python.org/ ; websockets: https://github.com/python-websockets/websockets\n'
                    'yt-dlp: https://github.com/yt-dlp/yt-dlp ; segno: https://github.com/heuer/segno\n'
+                   'Pillow: https://python-pillow.org/ ; license: _internal/pillow-10.4.0.dist-info/LICENSE\n'
                    'Microsoft C/C++运行库随应用部署，无需单独安装。\n')
         (package / '第三方依赖说明.txt').write_text(notices, encoding='utf-8-sig')
         print('Built: ' + str(package), flush=True)
