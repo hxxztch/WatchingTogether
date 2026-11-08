@@ -4,6 +4,36 @@ from app.bilibili import BilibiliClient, BilibiliError, QualityUnavailable, mixi
 from app.timecode import parse_timecode, format_timecode
 
 
+class MediaDiagnosticsTests(unittest.TestCase):
+    def test_backend_warning_classifies_without_logging_private_details(self):
+        from app.diagnostics import log_media_warning
+        secret = 'PRIVATE_COOKIE_AND_SIGNED_URL_TOKEN'
+        with self.assertLogs('player', level='WARNING') as captured:
+            log_media_warning('error', 'ffmpeg/http',
+                'HTTP error 403 Forbidden https://example.test/video?token=' + secret, 'bilibili')
+            log_media_warning('warn', 'stream',
+                'Connection timed out Cookie: ' + secret, 'remote')
+            log_media_warning('error', 'vd',
+                'Decoder failed for C:/private/' + secret + '.mp4', 'local')
+        text = '\n'.join(captured.output)
+        self.assertIn('http_status=403', text)
+        self.assertIn('category=network_timeout', text)
+        self.assertIn('category=decoder', text)
+        self.assertNotIn(secret, text)
+        self.assertNotIn('https://', text)
+        self.assertNotIn('C:/private', text)
+
+    def test_backend_warning_budget_prevents_unbounded_log_growth(self):
+        from types import SimpleNamespace
+        from app.player import MpvWidget
+        sink = SimpleNamespace(_mpv_warning_count=0, _media_source='remote')
+        with self.assertLogs('player', level='WARNING') as captured:
+            for _ in range(50):
+                MpvWidget._on_mpv_log(sink, 'warn', 'stream', 'Connection reset')
+            MpvWidget._on_mpv_log(sink, 'info', 'stream', 'not a warning')
+        self.assertEqual(len(captured.records), 30)
+
+
 class TimecodeTests(unittest.TestCase):
     def test_valid_formats_and_boundaries(self):
         for text, expected in [('0', 0), ('90', 90), ('01:30', 90), ('90:00', 5400), ('01:02:03', 3723)]:

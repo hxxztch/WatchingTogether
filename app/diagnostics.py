@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import platform
+import re
 import sys
 import threading
 import traceback
@@ -38,6 +39,31 @@ def record_action(name, **details):
     with _lock:
         _actions.append(entry)
     logging.info("Action: %s", entry)
+
+
+def log_media_warning(level, prefix, message, source):
+    """Classify backend failures without persisting URLs, paths or headers."""
+    if level not in ('warn', 'error', 'fatal'):
+        return
+    text = message.lower()
+    component = prefix.split('/', 1)[0]
+    if component not in ('ffmpeg', 'cplayer', 'stream', 'demux', 'vd', 'vo', 'ad', 'ao', 'lavf', 'cache'):
+        component = 'other'
+    status = re.search(r'\bhttp(?:/[0-9.]+)?(?:\s+(?:error|status|response)){0,2}\s*:?\s*([45][0-9]{2})\b', text)
+    if status:
+        category = 'http_error'
+    elif 'timed out' in text or 'timeout' in text:
+        category = 'network_timeout'
+    elif any(word in text for word in ('connection', 'network', 'tls', 'ssl', 'http')):
+        category = 'network_io'
+    elif any(word in text for word in ('decod', 'hwdec', 'd3d11', 'dxva', 'avcodec')):
+        category = 'decoder'
+    else:
+        category = 'playback_warning'
+    source = source if source in ('bilibili', 'remote', 'local') else 'unknown'
+    logging.getLogger('player').warning(
+        'MPV issue level=%s source=%s component=%s category=%s http_status=%s',
+        level, source, component, category, status.group(1) if status else 'none')
 
 
 def _exception(kind, value, tb):

@@ -1,5 +1,6 @@
 """MPV player embedded in a QWidget for PySide6."""
 import os
+import logging
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Signal
 
@@ -33,6 +34,14 @@ class MpvWidget(QWidget):
         self._loading_path = None
         self._volume = 80
         self._subtitle_history = []
+        self._media_source = 'local'
+        self._mpv_warning_count = 0
+
+    def _on_mpv_log(self, level, prefix, message):
+        if level in ('warn', 'error', 'fatal') and self._mpv_warning_count < 30:
+            self._mpv_warning_count += 1
+            from app.diagnostics import log_media_warning
+            log_media_warning(level, prefix, message, self._media_source)
 
     def _ensure_player(self):
         if self._setup_done:
@@ -50,6 +59,8 @@ class MpvWidget(QWidget):
             demuxer_readahead_secs="30",
             volume=self._volume,
             volume_max=130,
+            log_handler=self._on_mpv_log,
+            loglevel='warn',
         )
         self._setup_done = True
 
@@ -84,7 +95,9 @@ class MpvWidget(QWidget):
                 reason = 0
             if reason == 0:
                 self.playback_ended.emit()
-            elif reason == 4 and self._loading:
+            elif reason == 4:
+                logging.getLogger('player').warning(
+                    'MPV playback failed source=%s loading=%s', self._media_source, self._loading)
                 self._loading = False
                 self.media_load_failed.emit()
 
@@ -141,6 +154,8 @@ class MpvWidget(QWidget):
             self._player.pause = not self._player.pause
 
     def _replace_stream(self, path, audio, position, playing, bilibili=False):
+        self._media_source = 'bilibili' if bilibili else ('remote' if '://' in path else 'local')
+        self._mpv_warning_count = 0
         self._ensure_player()
         self._loading, self._loading_path = True, path
         options = {"start": str(max(0, position or 0)), "pause": "no" if playing else "yes",

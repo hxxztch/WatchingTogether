@@ -105,12 +105,13 @@ class MainWindow(QMainWindow):
         self._player.playback_started.connect(lambda: self._controls.set_playing(True))
         self._player.playback_paused.connect(lambda: self._controls.set_playing(False))
         self._player.media_load_failed.connect(
-            lambda: self._room_panel.set_status("视频流加载失败，请重试或重新解析视频链接", "#f44336"))
+            lambda: self._room_panel.set_status("视频流加载或播放失败，网页视频请尝试切换清晰度或重新打开链接", "#f44336"))
 
         self._danmaku = DanmakuOverlay(self)
         self._controls.danmaku_visibility_changed.connect(self._danmaku.set_enabled)
         self._chat_images_supported = False
         self._chat_gifs_supported = False
+        self._chat_large_images_supported = False
         self._danmaku.track(self._player)
 
         self._hotkey.connect(self._on_hotkey)
@@ -331,6 +332,8 @@ class MainWindow(QMainWindow):
             if mtype in ("room_created", "room_joined"):
                 self._chat_images_supported = bool(msg.get('chat_images'))
                 self._chat_gifs_supported = bool(msg.get('chat_gifs'))
+                from app.chat_media import MAX_MESSAGE_BYTES
+                self._chat_large_images_supported = msg.get('chat_media_bytes') == MAX_MESSAGE_BYTES
                 self._room_code = msg["room"]
                 self._room_ready = True
                 self._playback_sync = PlaybackSynchronizer()
@@ -379,7 +382,7 @@ class MainWindow(QMainWindow):
                 pos = msg.get("position", 0)
                 self._player.seek(pos)
             elif mtype == "chat":
-                picture = msg.get('animation') or msg.get('image')
+                picture = msg.get('image_large') or msg.get('animation') or msg.get('image')
                 self._room_panel.add_chat(msg.get("from", ""), msg.get("message", ""), picture)
                 self._danmaku.show_danmaku(msg.get("from", ""), msg.get("message", ""), picture)
             elif mtype == "sync_state":
@@ -523,8 +526,20 @@ class MainWindow(QMainWindow):
             return
         raw = image_bytes(image)
         payload = {'type': 'chat', 'message': '[图片]', 'image': image}
-        if raw.startswith((b'GIF87a', b'GIF89a')):
-            payload['image'] = prepare_image(raw, animate=False)
+        try:
+            image_bytes(image, legacy=True)
+            legacy = True
+        except ValueError:
+            legacy = False
+        if not legacy:
+            payload['image'] = prepare_image(raw, animate=False, legacy=True)
+            if getattr(self, '_chat_large_images_supported', False):
+                payload['image_large'] = image
+            else:
+                image = payload['image']
+                self._room_panel.set_status('当前房主版本较旧，已发送静态预览；更新房主后可发送较大表情。')
+        elif raw.startswith((b'GIF87a', b'GIF89a')):
+            payload['image'] = prepare_image(raw, animate=False, legacy=True)
             if self._chat_gifs_supported:
                 payload['animation'] = image
             else:

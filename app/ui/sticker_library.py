@@ -7,7 +7,7 @@ import zipfile
 import threading
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal
-from app.chat_media import image_bytes
+from app.chat_media import image_bytes, MAX_ORIGINAL_BYTES
 
 _LIBRARY_LOCK = threading.RLock()
 
@@ -144,7 +144,7 @@ class ImportImages(QThread):
                                 if entry.is_dir() or Path(entry.filename).suffix.lower() not in EXTENSIONS:
                                     continue
                                 used += 1
-                                if entry.file_size > 8 * 1024 * 1024:
+                                if entry.file_size > MAX_ORIGINAL_BYTES:
                                     failed += 1
                                     continue
                                 total += entry.file_size
@@ -152,7 +152,7 @@ class ImportImages(QThread):
                                 store(archive.read(entry), Path(entry.filename).stem, group)
                     elif path.is_file() and path.suffix.lower() in EXTENSIONS:
                         used += 1
-                        if path.stat().st_size > 8 * 1024 * 1024:
+                        if path.stat().st_size > MAX_ORIGINAL_BYTES:
                             failed += 1
                         else:
                             store(path.read_bytes(), path.stem, self.group)

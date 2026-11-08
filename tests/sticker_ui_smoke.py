@@ -45,6 +45,9 @@ def main():
         try:
             window.show()
             window.resize(1120, 720)
+            assert '画面卡住、音频正常' in window._shell.playback_notice.text()
+            assert '切换一次清晰度' in window._shell.playback_notice.text()
+            assert window._shell.playback_notice.wordWrap()
             manager = window._shell.sticker_manager
             picture = QImage(160, 120, QImage.Format_ARGB32)
             picture.fill(Qt.red)

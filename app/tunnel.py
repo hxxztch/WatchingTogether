@@ -91,14 +91,15 @@ class PublicTunnel(QObject):
         self.stop()
 
     def _error(self, error):
-        logging.error("Tunnel process error code=%s stopping=%s", int(error), self._stopping)
+        log = logging.info if self._stopping else logging.error
+        log("Tunnel process error code=%s stopping=%s", getattr(error, 'value', error), self._stopping)
         if not self._stopping and error == QProcess.FailedToStart:
             self.timer.stop()
             self.failed.emit('连接组件无法启动，请检查完整安装包。')
 
     def _finished(self, *args):
         logging.info("Tunnel process finished exit_code=%s exit_status=%s stopping=%s",
-                     self.process.exitCode(), int(self.process.exitStatus()), self._stopping)
+                     self.process.exitCode(), getattr(self.process.exitStatus(), 'value', self.process.exitStatus()), self._stopping)
         self.timer.stop()
         if not self._stopping:
             self.failed.emit('公共通道已停止，请重新创建邀请或使用原服务器连接。')

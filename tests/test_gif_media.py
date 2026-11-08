@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 from PySide6.QtGui import QMovie
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
-from app.chat_media import image_bytes, MAX_GIF_BYTES
+from app.chat_media import image_bytes, MAX_GIF_BYTES, MAX_GIF_EDGE, MAX_GIF_FRAMES, MAX_IMAGE_BYTES, MAX_ORIGINAL_BYTES
 from app.ui.chat_images import prepare_image, image_pixmap
 from app.ui.gif_images import set_label_image
 
@@ -27,7 +27,7 @@ def gif_bytes(count=3):
     frames = [Image.new('RGBA', (48, 32), color) for color in ('red', 'blue', 'green')]
     output = BytesIO()
     frames[0].save(output, format='GIF', save_all=True,
-                   append_images=(frames * 28)[1:count], duration=80, loop=0)
+                   append_images=(frames * ((count + 2) // 3))[1:count], duration=80, loop=0)
     return output.getvalue()
 
 
@@ -121,12 +121,66 @@ class GifTests(unittest.TestCase):
     def test_invalid_and_excessive_animation_rejected(self):
         value = prepare_image(gif_bytes())
         raw = bytearray(image_bytes(value))
-        raw[6:8] = (161).to_bytes(2, 'little')
+        raw[6:8] = (MAX_GIF_EDGE + 1).to_bytes(2, 'little')
         for broken in (bytes(raw), b'GIF89a', image_bytes(value)[:-3] + b';'):
             with self.assertRaises(ValueError):
                 image_bytes(base64.b64encode(broken).decode('ascii'))
         with self.assertRaises(ValueError):
-            prepare_image(gif_bytes(81))
+            prepare_image(gif_bytes(MAX_GIF_FRAMES + 1))
+
+    def test_original_between_eight_and_ten_mb_is_accepted_and_compressed(self):
+        import random
+        raw = random.Random(7).getrandbits(3000 * 1000 * 24).to_bytes(3000 * 1000 * 3, 'big')
+        output = BytesIO()
+        Image.frombytes('RGB', (3000, 1000), raw).save(output, format='PNG')
+        raw = output.getvalue()
+        self.assertGreater(len(raw), 8 * 1024 * 1024)
+        self.assertLess(len(raw), MAX_ORIGINAL_BYTES)
+        prepared = image_bytes(prepare_image(raw))
+        self.assertLessEqual(len(prepared), MAX_IMAGE_BYTES)
+        self.assertGreater(len(prepared), 24 * 1024)
+        with self.assertRaises(ValueError):
+            image_bytes(base64.b64encode(prepared).decode('ascii'), legacy=True)
+        with self.assertRaisesRegex(ValueError, '10 MB'):
+            prepare_image(b'x' * (MAX_ORIGINAL_BYTES + 1))
+
+    def test_gif_over_old_frame_limit_preserves_frames(self):
+        raw = gif_bytes(100)
+        value = prepare_image(raw)
+        with Image.open(BytesIO(image_bytes(value))) as image:
+            self.assertEqual(image.n_frames, 100)
+        self.assertEqual(image_bytes(value), raw)
+
+    def test_large_gif_is_compressed_under_one_mb_without_losing_frames(self):
+        import random
+        rng = random.Random(9)
+        frames = [Image.frombytes('RGB', (320, 320), rng.getrandbits(320 * 320 * 24).to_bytes(320 * 320 * 3, 'big'))
+                  for _ in range(15)]
+        output = BytesIO()
+        frames[0].save(output, format='GIF', save_all=True, append_images=frames[1:], duration=80, loop=0)
+        raw = output.getvalue()
+        self.assertGreater(len(raw), MAX_GIF_BYTES)
+        prepared = image_bytes(prepare_image(raw))
+        self.assertLessEqual(len(prepared), MAX_GIF_BYTES)
+        with Image.open(BytesIO(prepared)) as animation:
+            self.assertEqual(animation.n_frames, 15)
+            self.assertEqual(animation.info['duration'], 80)
+
+    def test_large_image_sender_negotiates_and_falls_back_without_disconnect(self):
+        from app.ui.main_window import MainWindow
+        output = BytesIO()
+        Image.new('RGB', (700, 700), 'blue').save(output, format='PNG')
+        value = prepare_image(output.getvalue())
+        for supported in (True, False):
+            window = SimpleNamespace(_room_ready=True, _chat_images_supported=True,
+                _chat_gifs_supported=True, _chat_large_images_supported=supported,
+                _network=Mock(), _room_panel=Mock(), _danmaku=Mock())
+            MainWindow._on_chat_image(window, value)
+            message = window._network.send.call_args[0][0]
+            image_bytes(message['image'], legacy=True)
+            self.assertEqual('image_large' in message, supported)
+            self.assertEqual(window._room_panel.add_chat.call_args[0][2],
+                             value if supported else message['image'])
 
     def test_qt_movie_advances_and_is_destroyed_with_label(self):
         label = QLabel()

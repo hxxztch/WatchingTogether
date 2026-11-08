@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, parse_qs, urlencode, urlunsplit
 from PySide6.QtCore import QThread, Signal
 from websockets.asyncio.server import serve
 from server import Server
+from app.chat_media import MAX_MESSAGE_BYTES
 
 
 def make_invitation(endpoint, room):
@@ -73,7 +74,7 @@ class EmbeddedHost(QThread):
 
             async with serve(handle, '0.0.0.0' if self.lan else '127.0.0.1', 0,
                              process_request=authenticate, ping_interval=10, ping_timeout=30,
-                             close_timeout=1, max_size=65536, max_queue=16) as listener:
+                             close_timeout=1, max_size=MAX_MESSAGE_BYTES, max_queue=4) as listener:
                 self.port = listener.sockets[0].getsockname()[1]
                 if not self._stopping.is_set():
                     self.ready.emit('ws://127.0.0.1:' + str(self.port) + self.host_path, self.port)

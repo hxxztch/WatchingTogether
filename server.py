@@ -11,6 +11,7 @@ import random
 import secrets
 import time
 from app.version import SERVER_VERSION
+from app.chat_media import MAX_MESSAGE_BYTES, MAX_HISTORY_BYTES, MAX_OUTBOX_BYTES, wire_size
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
@@ -30,18 +31,28 @@ class Peer:
         self.limit = limit
         self.send_timeout = send_timeout
         self.failed = False
+        self.large_images = False
+        self.queued_bytes = 0
 
     def send(self, message):
         if self.failed:
             return
+        if message.get('image_large') is not None and not self.large_images:
+            message = {key: value for key, value in message.items() if key != 'image_large'}
+        if (not self.large_images and message.get('type') == 'chat' and message.get('image')
+                and wire_size(message) > 64000):
+            message = dict(message, message='[图片]')
         # Only unsolicited snapshots are coalesced; replies and chat stay ordered.
         if message.get("type") == "sync_state" and not message.get("request_id"):
             self.queue = deque(item for item in self.queue
                                if item.get("type") != "sync_state" or item.get("request_id"))
-        if len(self.queue) >= self.limit:
+            self.queued_bytes = sum(wire_size(item) for item in self.queue)
+        size = wire_size(message)
+        if len(self.queue) >= self.limit or self.queued_bytes + size > MAX_OUTBOX_BYTES:
             self.failed = True
         else:
             self.queue.append(message)
+            self.queued_bytes += size
         self.wakeup.set()
 
     async def run(self):
@@ -53,8 +64,10 @@ class Peer:
                 if self.failed:
                     raise ConnectionError("Client output queue is full")
                 message = self.queue.popleft()
+                self.queued_bytes -= wire_size(message)
+                timeout = max(20, self.send_timeout) if message.get('image_large') else self.send_timeout
                 await asyncio.wait_for(
-                    self.ws.send(json.dumps(message, ensure_ascii=False)), self.send_timeout)
+                    self.ws.send(json.dumps(message, ensure_ascii=False)), timeout)
             self.wakeup.clear()
 
 
@@ -79,6 +92,19 @@ class Room:
         self.version = 0
         self.chat_seq = 0
         self.history = deque(maxlen=100)
+        self.history_sizes = deque()
+        self.history_bytes = 0
+
+    def remember_chat(self, token, event, size):
+        if len(self.history) == self.history.maxlen:
+            self.history.popleft()
+            self.history_bytes -= self.history_sizes.popleft()
+        self.history.append((token, event))
+        self.history_sizes.append(size)
+        self.history_bytes += size
+        while self.history_bytes > MAX_HISTORY_BYTES:
+            self.history.popleft()
+            self.history_bytes -= self.history_sizes.popleft()
 
     @property
     def member_names(self):
@@ -215,6 +241,7 @@ class Server:
                         if member is not None:
                             raise ValueError("Leave the current room first")
                         peer.protocol = 2 if msg.get("protocol") == 2 else 1
+                        peer.large_images = msg.get('chat_media_bytes') == MAX_MESSAGE_BYTES
                         if mtype == "resume_room":
                             candidate = self.rooms.get(msg.get("room"))
                             restored = candidate.members.get(msg.get("token")) if candidate else None
@@ -254,12 +281,13 @@ class Server:
                                    "room": room.code, "name": member.name,
                                    "token": member.token, "protocol": 2,
                                    "chat_seq": cursor, "chat_images": True, "chat_gifs": True,
+                                   "chat_media_bytes": MAX_MESSAGE_BYTES,
                                    "resumed": mtype == "resume_room", "members": room.member_names,
                                    "state": room.snapshot()})
                         if mtype == "resume_room":
                             if room.history and cursor < room.history[0][1]["seq"] - 1:
                                 peer.send({"type": "delivery_failed",
-                                           "message": "离线期间聊天过多，仅恢复最近100条记录"})
+                                           "message": "离线期间聊天过多，部分较早记录已过期"})
                             for sender_token, event in room.history:
                                 if event["seq"] > cursor and sender_token != member.token:
                                     peer.send(event)
@@ -291,12 +319,18 @@ class Server:
                         picture = msg.get('image')
                         if picture is not None:
                             from app.chat_media import image_bytes
-                            image_bytes(picture)
+                            image_bytes(picture, legacy=True)
                         animation = msg.get('animation')
                         if animation is not None:
                             from app.chat_media import image_bytes
-                            if picture is None or not image_bytes(animation).startswith((b'GIF87a', b'GIF89a')):
+                            if picture is None or not image_bytes(animation, legacy=True).startswith((b'GIF87a', b'GIF89a')):
                                 raise ValueError('Invalid GIF attachment')
+                        large = msg.get('image_large')
+                        if large is not None:
+                            from app.chat_media import image_bytes
+                            if picture is None or not peer.large_images:
+                                raise ValueError('Large image capability required')
+                            image_bytes(large)
                         room.chat_seq += 1
                         event = {"type": "chat", "from": member.name,
                                  "message": message, "id": message_id, "seq": room.chat_seq}
@@ -304,10 +338,13 @@ class Server:
                             event['image'] = picture
                         if animation is not None:
                             event['animation'] = animation
-                        if len(json.dumps(event, ensure_ascii=False).encode('utf-8')) > 64000:
+                        if large is not None:
+                            event['image_large'] = large
+                        size = wire_size(event)
+                        if size > MAX_MESSAGE_BYTES:
                             room.chat_seq -= 1
                             raise ValueError('Image message is too large')
-                        room.history.append((member.token, event))
+                        room.remember_chat(member.token, event, size)
                         self.broadcast(room, event, exclude=member)
                     elif mtype == "load":
                         # Opening each viewer's own media must not reset the shared clock.
@@ -367,7 +404,7 @@ async def main(host="0.0.0.0", port=9877):
         log.info("Clients on this computer: ws://127.0.0.1:%s", port)
         log.info("Other computers: ws://<this PC's LAN or VPN IP>:%s ; Ctrl+C to stop", port)
         async with serve(server.handle, host, port, ping_interval=10,
-                         ping_timeout=30, close_timeout=2, max_size=65536) as listener:
+                         ping_timeout=30, close_timeout=2, max_size=MAX_MESSAGE_BYTES, max_queue=4) as listener:
             await listener.serve_forever()
 
 

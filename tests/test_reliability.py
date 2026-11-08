@@ -311,6 +311,31 @@ class SocketTests(unittest.IsolatedAsyncioTestCase):
 
 
 class QueueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_image_queues_and_room_history_have_byte_budgets(self):
+        from app.chat_media import MAX_HISTORY_BYTES, MAX_OUTBOX_BYTES, wire_size
+        payload = {'type': 'chat', 'image_large': 'x' * (1024 * 1024)}
+        size = wire_size(payload)
+        room = Room('1234')
+        peer = Peer(None)
+        peer.large_images = True
+        for index in range(30):
+            event = dict(payload, seq=index)
+            room.remember_chat('sender', event, wire_size(event))
+            peer.send(event)
+        self.assertLessEqual(room.history_bytes, MAX_HISTORY_BYTES)
+        self.assertEqual(room.history_bytes, sum(wire_size(event) for _, event in room.history))
+        self.assertEqual(room.history[-1][1]['seq'], 29)
+        self.assertTrue(peer.failed)
+        self.assertLessEqual(peer.queued_bytes, MAX_OUTBOX_BYTES)
+        client = NetworkClient()
+        client._session = {'room': '1234'}
+        rejected = []
+        client.signals.message_received.connect(rejected.append)
+        for _ in range(30):
+            client._enqueue_command(dict(payload), client._generation)
+        self.assertLessEqual(sum(wire_size(event) for _, event in client._pending_chats.values()), MAX_HISTORY_BYTES)
+        self.assertTrue(any(event.get('type') == 'delivery_failed' for event in rejected))
+
     async def test_slow_peer_does_not_hold_up_healthy_peer(self):
         class Socket:
             def __init__(self, slow=False):

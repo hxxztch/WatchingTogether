@@ -86,7 +86,7 @@ def build(components=None):
         print('Built: ' + str(package), flush=True)
 
 
-def archive(output, names=None, filenames=None):
+def archive(output, names=None, filenames=None, root_names=None):
     import hashlib
     output.mkdir(parents=True, exist_ok=True)
     hashes = []
@@ -103,7 +103,8 @@ def archive(output, names=None, filenames=None):
                     if path.name in ('config.json', 'crash.log', 'crash.log.1', 'crash.log.2',
                                      'crash.log.3', 'fatal.log', 'fatal.log.1'):
                         continue
-                    archive.write(path, path.relative_to(DIST))
+                    folder = (root_names or {}).get(name, name)
+                    archive.write(path, Path(folder) / path.relative_to(package))
         with zipfile.ZipFile(target) as archive:
             assert archive.testzip() is None
         digest = hashlib.sha256(target.read_bytes()).hexdigest()

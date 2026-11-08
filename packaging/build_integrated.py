@@ -3,13 +3,14 @@ import argparse
 import shutil
 from pathlib import Path
 import build_release as release
+from app.version import CLIENT_FOLDER_NAME
 
 release.DIST = release.ROOT / 'dist' / release.CLIENT_VERSION
 release.WORK = release.ROOT / 'build' / release.CLIENT_VERSION
 release.CLIENT_HELP = f'''超时空会夜机 {release.CLIENT_VERSION}
 Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 
-1. 完整解压后运行 EXE，保留 _internal 文件夹。
+1. 完整解压后进入「超时空会夜机」文件夹运行 EXE，保留 _internal 文件夹。
 2. 先在「个人中心」填写昵称，离开输入框即自动保存。再到「房间」选「公共通道」，创建后复制邀请链接给朋友。
    朋友粘贴完整邀请链接即可加入，无需自行部署服务器或配置内网穿透。
    首次建通道最多等待 60 秒；新域名生效可能延迟，加入最多等待 90 秒，可随时取消。
@@ -32,9 +33,9 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 12. 聊天室输入框旁的「表情」可点系统emoji插入文字；点自定义或导入的图片直接单独发送，分类栏「+」可上传图片发送。底部控制栏仅发送文字弹幕。
     个人中心的「表情包管理」可添加自定义图片、导入文件夹/ZIP外部表情包集，统一通过「重命名表情包」修改选中表情的名称、删除图片；系统emoji不可改动。
     影厅「收起视频功能」可收起登录、音轨、分P和字幕，增加聊天空间；右上角「详情」查看成员，离开房间请前往侧栏「房间」。
-    PNG/JPG/WebP/BMP/GIF均可导入；GIF保留动画，最多80帧/15秒/总解码6400万像素，自动压缩至160像素/20KB以内。单图原文件最多8MB，静态图尺寸最多1600万像素。
+    PNG/JPG/WebP/BMP/GIF均可导入；原文件最多10MB，静态图自动压缩至1024像素/512KB以内。GIF保留动画，最多240帧/30秒，自动压缩至320像素/1MB以内；保留解码量保护。
     右键聊天室中的图片选「添加到表情」收藏到❤️分类；支持GIF动画、自动去重。旧版已导入的GIF需重新导入原文件才能恢复动画。
-    GIF动画需要新版房主/服务器及接收客户端，旧版显示静态首帧。聊天室缩略图最长边112像素，支持像素滚动；查看历史时新消息不会强制拉回底部。
+    较大图片/GIF需要新版房主/服务器及接收客户端，旧版接收24KB以内的静态预览。聊天室缩略图最长边112像素，支持像素滚动；查看历史时新消息不会强制拉回底部。
     表情保存在EXE旁stickers文件夹，升级时保留；重新分发前请移除个人表情库。图片消息需要新版房主/服务器支持。
 13. 播放中最小化主窗口会弹出小窗，已有小窗不会随主窗口最小化；点小窗「返回影厅」恢复主窗口。
 14. 「设置」里的更新源默认选择 Gitee，可切换到 GitHub，选择自动保存。两种来源均支持差异包下载、校验和退出后安装，保留个人配置及表情库。
@@ -62,4 +63,5 @@ if __name__ == '__main__':
                           'License: _internal/THIRD-PARTY-CLOUDFLARED.txt\n')
     else:
         release.archive(args.output, names=[release.CLIENT_NAME],
-                        filenames={release.CLIENT_NAME: release.CLIENT_VERSION + '.zip'})
+                        filenames={release.CLIENT_NAME: release.CLIENT_VERSION + '.zip'},
+                        root_names={release.CLIENT_NAME: CLIENT_FOLDER_NAME})

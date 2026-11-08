@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QMovie
 from app.config import load as _cfg_load, save as _cfg_save
+from app.chat_media import MAX_HISTORY_BYTES
 import os as _os, sys as _sys
 
 if getattr(_sys, 'frozen', False):
@@ -382,6 +383,7 @@ class RoomPanel(QWidget):
             else:
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, 'image')
+                item.setData(Qt.UserRole + 1, len(image))
                 widget = QWidget()
                 layout = QVBoxLayout(widget)
                 layout.setContentsMargins(4, 4, 4, 4)
@@ -413,8 +415,13 @@ class RoomPanel(QWidget):
                     movie.stop()
                     movie.jumpToFrame(0)
                 images = [i for i in range(self._chat_list.count()) if self._chat_list.item(i).data(Qt.UserRole) == 'image']
-                if len(images) > 100:
-                    self._remove_chat_item(images[0])
+                media_bytes = sum(self._chat_list.item(index).data(Qt.UserRole + 1) or 0 for index in images)
+                removed = 0
+                while len(images) - removed > 100 or media_bytes > MAX_HISTORY_BYTES:
+                    index = images[removed] - removed
+                    media_bytes -= self._chat_list.item(index).data(Qt.UserRole + 1) or 0
+                    self._remove_chat_item(index)
+                    removed += 1
         else:
             self._chat_list.addItem(f"[{sender}] {msg}")
         while self._chat_list.count() > 1000:

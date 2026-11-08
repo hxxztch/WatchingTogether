@@ -7,16 +7,16 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidget, QListWidgetItem, QFileDialog, QLabel, QMessageBox, QTabBar,
     QWidget, QInputDialog, QStylePainter, QStyleOptionTab, QStyle, QToolButton)
 import app.config as config
-from app.chat_media import MAX_IMAGE_BYTES, image_bytes
+from app.chat_media import MAX_IMAGE_BYTES, MAX_ORIGINAL_BYTES, MAX_IMAGE_EDGE, LEGACY_IMAGE_BYTES, image_bytes
 
 EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'}
 IMAGE_FILTER = '图片 (*.png *.jpg *.jpeg *.webp *.gif *.bmp)'
 EMOJIS = ['😀', '😂', '🥰', '😎', '😭', '😮', '😡', '🤔', '👍', '👎', '👏', '🙏', '❤️', '🎉', '🍿', '🎬']
 
 
-def prepare_image(raw, animate=True):
-    if len(raw) > 8 * 1024 * 1024:
-        raise ValueError('原图超过 8 MB，请选择较小的图片。')
+def prepare_image(raw, animate=True, legacy=False):
+    if len(raw) > MAX_ORIGINAL_BYTES:
+        raise ValueError('原图超过 10 MB，请选择较小的图片。')
     if animate and raw.startswith((b'GIF87a', b'GIF89a')):
         from app.ui.gif_images import prepare_gif
         try:
@@ -31,17 +31,20 @@ def prepare_image(raw, animate=True):
     size = reader.size()
     if not size.isValid() or size.width() * size.height() > 16000000:
         raise ValueError('图片无法读取或尺寸超过 1600 万像素。')
-    reader.setScaledSize(size.scaled(320, 320, Qt.KeepAspectRatio))
+    maximum_edge = 320 if legacy else MAX_IMAGE_EDGE
+    if size.width() > maximum_edge or size.height() > maximum_edge:
+        reader.setScaledSize(size.scaled(maximum_edge, maximum_edge, Qt.KeepAspectRatio))
     picture = reader.read()
     if picture.isNull():
         raise ValueError('无法解码此图片。')
-    for edge in (320, 240, 180, 128, 96, 64):
-        small = picture.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    edges = (320, 240, 180, 128, 96, 64) if legacy else (1024, 768, 640, 512, 384, 320, 240)
+    for edge in edges:
+        small = picture.scaled(edge, edge, Qt.KeepAspectRatio, Qt.SmoothTransformation) if max(picture.width(), picture.height()) > edge else picture
         output = QBuffer()
         output.open(QIODevice.WriteOnly)
         if small.save(output, 'PNG'):
             data = bytes(output.data())
-            if len(data) <= MAX_IMAGE_BYTES:
+            if len(data) <= (LEGACY_IMAGE_BYTES if legacy else MAX_IMAGE_BYTES):
                 return base64.b64encode(data).decode('ascii')
     raise ValueError('图片无法压缩到发送大小。')
 
@@ -277,8 +280,8 @@ class EmojiPicker(QDialog):
         path, _ = QFileDialog.getOpenFileName(owner, '发送图片', '', IMAGE_FILTER)
         if path:
             try:
-                if Path(path).stat().st_size > 8 * 1024 * 1024:
-                    raise ValueError('原图超过 8 MB。')
+                if Path(path).stat().st_size > MAX_ORIGINAL_BYTES:
+                    raise ValueError('原图超过 10 MB。')
                 self.image_chosen.emit(prepare_image(Path(path).read_bytes()))
                 self.accept()
             except (OSError, ValueError) as exc:
@@ -301,7 +304,7 @@ class StickerManager(QWidget):
         self.browser = StickerBrowser()
         self.list = self.browser.list
         layout.addWidget(self.browser)
-        self.note = QLabel('系统 emoji 可与文字一起发送；图片表情单独发送。支持 GIF 动画（最多80帧、15秒，自动压缩至20KB）。\n每次最多导入 100 张，表情库最多 300 张；仅保存在本机。旧版已导入的GIF需重新导入才能恢复动画。')
+        self.note = QLabel('原图最多10MB；静态图压缩至512KB、GIF至1MB（最多240帧、30秒）。\n系统emoji可插入文字；图片表情单独发送。每批最多导入100张，表情库最多300张，仅存本机。较大表情需新版房主及客户端，旧版接收静态预览。')
         self.note.setWordWrap(True)
         self.note.setTextFormat(Qt.PlainText)
         layout.addWidget(self.note)

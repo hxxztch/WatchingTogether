@@ -5,11 +5,15 @@ import unittest
 import subprocess
 import sys
 import threading
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 from app.hosting import EmbeddedHost, make_invitation, parse_invitation
 from app.network import NetworkClient
+from app.chat_media import MAX_MESSAGE_BYTES
 
 APP = QCoreApplication.instance() or QCoreApplication([])
 
@@ -28,6 +32,48 @@ async def send(ws, kind, **kw):
 
 
 class HostingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_gif_new_client_old_client_and_reconnect(self):
+        import base64
+        import random
+        from io import BytesIO
+        from PIL import Image
+        from app.ui.chat_images import prepare_image
+        from app.chat_media import image_bytes
+        rng = random.Random(8)
+        frames = [Image.frombytes('RGB', (256, 256), rng.getrandbits(256 * 256 * 24).to_bytes(256 * 256 * 3, 'big'))
+                  for _ in range(10)]
+        output = BytesIO()
+        frames[0].save(output, format='GIF', save_all=True, append_images=frames[1:], duration=80, loop=0)
+        large = prepare_image(output.getvalue())
+        self.assertGreater(len(large), 65536)
+        image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhWQAAAAASUVORK5CYII='
+        owner = await self.socket(self.host.host_path)
+        await send(owner, 'create_room', name='owner', protocol=2, chat_media_bytes=MAX_MESSAGE_BYTES)
+        room = await receive(owner, 'room_created')
+        self.assertEqual(room['chat_media_bytes'], MAX_MESSAGE_BYTES)
+        guest = await self.socket(self.host.guest_path)
+        await send(guest, 'join_room', name='new', room=room['room'], protocol=2, chat_media_bytes=MAX_MESSAGE_BYTES)
+        joined = await receive(guest, 'room_joined')
+        old = await connect(self.base + self.host.guest_path, max_size=65536)
+        self.sockets.append(old)
+        await receive(old, 'hello')
+        await send(old, 'join_room', name='old', room=room['room'], protocol=2)
+        await receive(old, 'room_joined')
+        await send(owner, 'chat', message='[image]', image=image, image_large=large)
+        event = await receive(guest, 'chat')
+        self.assertEqual(event['image_large'], large)
+        image_bytes(event['image_large'])
+        legacy = await receive(old, 'chat')
+        self.assertNotIn('image_large', legacy)
+        image_bytes(legacy['image'], legacy=True)
+        await guest.close()
+        resumed = await self.socket(self.host.guest_path)
+        await send(resumed, 'resume_room', room=room['room'], token=joined['token'], chat_seq=0,
+                   chat_media_bytes=MAX_MESSAGE_BYTES)
+        await receive(resumed, 'room_joined')
+        self.assertEqual((await receive(resumed, 'chat'))['image_large'], large)
+        await send(old, 'chat', message='still online')
+        self.assertEqual((await receive(owner, 'chat'))['message'], 'still online')
     async def test_image_chat_validation_dedup_and_resume(self):
         import base64
         # A standard 1x1 PNG, no GUI required on the server.
@@ -99,7 +145,7 @@ class HostingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await asyncio.get_running_loop().run_in_executor(None, self.host.stop))
 
     async def socket(self, path):
-        ws = await connect(self.base + path)
+        ws = await connect(self.base + path, max_size=MAX_MESSAGE_BYTES)
         self.sockets.append(ws)
         await receive(ws, 'hello')
         return ws
@@ -164,6 +210,55 @@ class InvitationTests(unittest.TestCase):
                       'ws://host/room/key?room=１２３４'):
             with self.assertRaises(ValueError):
                 parse_invitation(value)
+
+
+class TunnelShutdownTests(unittest.TestCase):
+    def test_native_process_stop_cleans_up_without_enum_callback_exception(self):
+        from app.tunnel import PublicTunnel
+        from PySide6.QtCore import QProcess
+        tunnel = PublicTunnel()
+        tunnel._temp = tempfile.TemporaryDirectory(prefix='tunnel-stop-qa-')
+        temporary = Path(tunnel._temp.name)
+        exceptions, failures = [], []
+        tunnel.failed.connect(failures.append)
+        try:
+            with patch.object(sys, 'excepthook', lambda *args: exceptions.append(args[1])):
+                tunnel.process.setProgram(sys.executable)
+                tunnel.process.setArguments(['-c', 'import time; time.sleep(30)'])
+                tunnel.process.start()
+                self.assertTrue(tunnel.process.waitForStarted(3000))
+                tunnel.timer.start(10000)
+                tunnel.stop()
+                APP.processEvents()
+            self.assertEqual(exceptions, [])
+            self.assertEqual(failures, [])
+            self.assertEqual(tunnel.process.state(), QProcess.NotRunning)
+            self.assertFalse(tunnel.timer.isActive())
+            self.assertIsNone(tunnel._job)
+            self.assertIsNone(tunnel._temp)
+            self.assertFalse(temporary.exists())
+        finally:
+            tunnel.stop()
+            tunnel.deleteLater()
+
+    def test_native_failed_start_emits_friendly_error_without_enum_exception(self):
+        from app.tunnel import PublicTunnel
+        tunnel = PublicTunnel()
+        exceptions, failures = [], []
+        tunnel.failed.connect(failures.append)
+        try:
+            with tempfile.TemporaryDirectory() as directory, patch.object(
+                    sys, 'excepthook', lambda *args: exceptions.append(args[1])):
+                tunnel.process.setProgram(str(Path(directory) / 'missing-helper.exe'))
+                tunnel.process.start()
+                self.assertFalse(tunnel.process.waitForStarted(3000))
+                APP.processEvents()
+            self.assertEqual(exceptions, [])
+            self.assertEqual(len(failures), 1)
+            self.assertIn('无法启动', failures[0])
+        finally:
+            tunnel.stop()
+            tunnel.deleteLater()
 
 
 class WorkerShutdownTests(unittest.IsolatedAsyncioTestCase):

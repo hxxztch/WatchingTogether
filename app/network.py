@@ -10,6 +10,7 @@ import uuid
 
 from PySide6.QtCore import QThread, Signal, QObject
 from websockets.asyncio.client import connect
+from app.chat_media import MAX_MESSAGE_BYTES, MAX_HISTORY_BYTES, wire_size
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class NetworkClient(QThread):
             tasks = []
             try:
                 async with connect(self.url, ping_interval=10, ping_timeout=30,
-                                   open_timeout=5, close_timeout=2, max_size=65536) as ws:
+                                   open_timeout=5, close_timeout=2, max_size=MAX_MESSAGE_BYTES, max_queue=4) as ws:
                     connected_at = time.monotonic()
                     self._ws = ws
                     self._transport = ws.transport
@@ -109,9 +110,9 @@ class NetworkClient(QThread):
                     if self._session:
                         self._membership_pending = True
                         if self._session.get("token"):
-                            self._put({"type": "resume_room", "protocol": 2, **self._session})
+                            self._put({"type": "resume_room", "protocol": 2, **self._session, 'chat_media_bytes': MAX_MESSAGE_BYTES})
                         else:
-                            self._put({"type": "join_room", "protocol": 2, **self._session})
+                            self._put({"type": "join_room", "protocol": 2, **self._session, 'chat_media_bytes': MAX_MESSAGE_BYTES})
                     tasks = [asyncio.create_task(self._receive_loop(ws)),
                              asyncio.create_task(self._send_loop(ws)),
                              asyncio.create_task(self._sync_loop())]
@@ -200,6 +201,10 @@ class NetworkClient(QThread):
             if len(self._pending_chats) >= 32:
                 self._delivery_failed("待发送聊天已达上限，本条未发送")
                 return
+            pending_bytes = sum(wire_size(item) for _, item in self._pending_chats.values())
+            if pending_bytes + wire_size(message) > MAX_HISTORY_BYTES:
+                self._delivery_failed('待发送图片较多，请等待发送确认后再试')
+                return
             message["id"] = uuid.uuid4().hex
             self._pending_chats[message["id"]] = (time.monotonic(), message)
             if self._ready:
@@ -213,6 +218,7 @@ class NetworkClient(QThread):
                 self.signals.error_occurred.emit("请先离开当前房间或等待连接完成")
                 return
             message["protocol"] = 2
+            message['chat_media_bytes'] = MAX_MESSAGE_BYTES
             self._membership_pending = self._put(message)
             return
         if not self._ready:
@@ -346,7 +352,8 @@ class NetworkClient(QThread):
                 continue
             if message.get("type") == "chat" and message.get("id") not in self._pending_chats:
                 continue
-            await asyncio.wait_for(ws.send(json.dumps(message, ensure_ascii=False)), 5)
+            timeout = 20 if message.get('image_large') else 5
+            await asyncio.wait_for(ws.send(json.dumps(message, ensure_ascii=False)), timeout)
             if self._protocol < 2 and message.get("type") == "chat":
                 self._pending_chats.pop(message.get("id"), None)
 
