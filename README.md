@@ -107,7 +107,7 @@ ngrok http 9877
 
 ### 启动客户端
 
-Windows 下可双击「启动界面预览.cmd」，使用项目目录的 Python 虚拟环境启动。也可直接运行：
+Windows 下可双击「启动界面预览.cmd」，使用 PATH 中的系统 `python` 启动。请先安装 Python 3.8 或更高版本并执行 `python -m pip install -r requirements.txt`；未找到 Python、缺少依赖或运行库加载失败时，脚本会提示手动配置。也可在前文创建的虚拟环境中直接运行：
 
 ```bat
 .venv\Scripts\python.exe client.py
