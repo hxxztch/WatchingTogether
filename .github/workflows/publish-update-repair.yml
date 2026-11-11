@@ -2,23 +2,13 @@ name: Publish standalone update repair assistant
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['beta/0.1.4']
-    paths:
-      - '.github/workflows/publish-update-repair.yml'
-      - 'packaging/apply_update.ps1'
-      - 'packaging/repair_update.cmd'
-      - 'packaging/repair_update.ps1'
-      - 'packaging/build_update_repair.py'
-      - 'packaging/repair_release_notes.txt'
-      - 'packaging/修复升级说明.txt'
 
 permissions:
   contents: write
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/beta/0.1.4'
+    if: github.ref == 'refs/heads/beta'
     runs-on: windows-latest
     env:
       PYTHONUTF8: '1'
@@ -42,7 +32,7 @@ jobs:
           tag_name: repair-beta0.1.4
           target_commitish: ${{ github.sha }}
           name: 'beta0.1.4 更新修复助手'
-          prerelease: true
+          prerelease: false
           make_latest: false
           body_path: packaging/repair_release_notes.txt
           files: dist/update-repair/*

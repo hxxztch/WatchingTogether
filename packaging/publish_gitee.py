@@ -156,7 +156,7 @@ def publish(tag, directory, token):
     release = api.api('GET', '/releases/tags/' + tag, missing=True)
     if release is None:
         release = api.api('POST', '/releases', {'tag_name': tag, 'target_commitish': tag,
-            'name': tag, 'body': notes + '\n\n附件准备中，校验完成后开放自动更新。', 'prerelease': 'true'})
+            'name': tag, 'body': notes + '\n\n附件准备中，校验完成后开放自动更新。', 'prerelease': 'false'})
     rid = release['id']
     existing = api.api('GET', '/releases/{}/attach_files'.format(rid), {'per_page': 100})
     assets = []
@@ -185,7 +185,7 @@ def publish(tag, directory, token):
     entry = {'tag_name': tag, 'html_url': SOURCES['gitee'].page_url + '/' + tag, 'assets': assets}
     encoded = base64.b64encode(json.dumps(entry, ensure_ascii=False, separators=(',', ':')).encode('utf-8')).decode('ascii')
     api.api('PATCH', '/releases/' + str(rid), {'tag_name': tag, 'name': tag,
-        'prerelease': 'true', 'body': notes + '\n\n' + MANIFEST_START + encoded + MANIFEST_END})
+        'prerelease': 'false', 'body': notes + '\n\n' + MANIFEST_START + encoded + MANIFEST_END})
     # Publish discovery only after every attachment passed anonymous download verification.
     endpoint = '/contents/releases.json'
     old = api.api('GET', endpoint, {'ref': 'update-feed'}, missing=True)

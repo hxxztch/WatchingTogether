@@ -73,7 +73,7 @@ py -3 -m venv .venv
 
 Gitee 的分段附件在软件内下载时自动合并、校验。手动下载时需取得全部分段和发行页提供的 `merge-betaX.Y.Z.cmd`，运行合并脚本后解压完整 ZIP。
 
-项目使用 [GitHub Actions](.github/workflows/release-beta.yml)发布 beta 客户端：`app/version.py` 中的版本与推送标签对应，工作流构建完整包、差异包并更新发布清单。Gitee 同步由 `packaging/publish_gitee.py` 处理。
+项目在统一的 `beta` 分支开发。发布时修改 `app/version.py` 中的版本，并更新 `更新日志.txt` 首节，推送 `beta` 后由 [GitHub Actions](.github/workflows/release-beta.yml)构建完整包和差异包、创建对应版本标签，以正式 Release（Latest）发布，并同步 Gitee 源码、附件及两端更新清单。已发布的版本不会因普通提交而重复打包；每个小版本使用标签记录，不再单独建立长期分支。Gitee 自动同步使用仓库的 `GITEE_TOKEN` Actions Secret。
 
 ### 启动服务端
 

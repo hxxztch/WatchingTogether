@@ -77,5 +77,5 @@ def publish(repo, tag, token):
 
 
 if __name__ == "__main__":
-    publish(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_REF_NAME"],
+    publish(os.environ["GITHUB_REPOSITORY"], os.environ.get("RELEASE_VERSION") or os.environ["GITHUB_REF_NAME"],
             os.environ["GH_TOKEN"])
