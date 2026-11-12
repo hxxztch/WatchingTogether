@@ -44,7 +44,8 @@ def api(method, endpoint, token, payload=None):
                                "User-Agent": "WatchingTogether-release-feed",
                                "Content-Type": "application/json"})
     with urlopen(request, timeout=30) as response:
-        return json.load(response)
+        data = response.read()
+        return json.loads(data) if data else None
 
 
 def publish(repo, tag, token):

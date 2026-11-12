@@ -217,6 +217,8 @@ class MainWindow(QMainWindow):
         self._fs_mouse_timer.start(100)
         self._controls_hide_delay = 1800
 
+        from app.ui.room_share import RoomShareController
+        self._sharing = RoomShareController(self)
         app = QApplication.instance()
         if app:
             app.installEventFilter(self)
@@ -1153,6 +1155,7 @@ class MainWindow(QMainWindow):
             self._room_panel.set_status('字幕移除失败，请稍后重试。', '#b36b4a')
 
     def closeEvent(self, event):
+        self._sharing.stop()
         record_action("client.close")
         self._closing = True
         self._shell.settings.stop()

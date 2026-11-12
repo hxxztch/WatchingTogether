@@ -23,7 +23,7 @@ from app.updates import (MANIFEST_START, MANIFEST_END, SOURCES,
 
 REPO = 'hxxztch/watching-together'
 API = 'https://gitee.com/api/v5/repos/' + REPO
-PART_SIZE = 90_000_000
+PART_SIZE = 30_000_000
 
 
 def public_session():

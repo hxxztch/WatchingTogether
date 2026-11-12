@@ -51,6 +51,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
         run: python packaging/prepare_release.py
   release:
     needs: plan
@@ -60,6 +61,7 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
       RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -133,6 +135,12 @@ jobs:
           $body = ($lines[1..($next - 1)] -join "`n").Trim()
           if (-not $body) { throw 'Release notes are empty' }
           Set-Content -LiteralPath release-notes.txt -Value $body -Encoding UTF8
+      - name: Move explicitly republished version tag
+        if: env.REPUBLISH_VERSION == env.RELEASE_VERSION
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$env:RELEASE_VERSION" -f "sha=$env:GITHUB_SHA" -F force=true
       - uses: softprops/action-gh-release@v2
         if: needs.plan.outputs.build == 'true'
         with:
@@ -148,6 +156,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python packaging/publish_update_feed.py
+      - name: Invalidate outgoing deltas built from the previous same-version files
+        if: env.REPUBLISH_VERSION == env.RELEASE_VERSION
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python packaging/invalidate_republished_deltas.py
       - name: Mirror version tag, release assets and update feed to Gitee
         shell: pwsh
         env:
@@ -158,10 +173,14 @@ jobs:
           $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("hxxztch:$env:GITEE_TOKEN"))
           Write-Output "::add-mask::$basic"
           git remote add gitee https://gitee.com/hxxztch/watching-together.git
-          git fetch origin "refs/tags/$env:RELEASE_VERSION`:refs/tags/$env:RELEASE_VERSION"
+          git fetch origin "+refs/tags/$env:RELEASE_VERSION`:refs/tags/$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Could not fetch published version tag' }
           # Manual retries use the existing immutable version tag, not the newer HEAD.
-          git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "refs/tags/$env:RELEASE_VERSION"
+          if ($env:REPUBLISH_VERSION -eq $env:RELEASE_VERSION) {
+            git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push --force gitee "refs/tags/$env:RELEASE_VERSION"
+          } else {
+            git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "refs/tags/$env:RELEASE_VERSION"
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror version tag' }
           python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir "dist/gitee-$env:RELEASE_VERSION" --from-github
           if ($LASTEXITCODE -ne 0) { throw 'Gitee release publication failed' }

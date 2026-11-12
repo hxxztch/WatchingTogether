@@ -81,6 +81,11 @@ class RoomController(QObject):
         self.endpoint = url
         self.connect(url, {'type': 'join_room', 'room': room, 'name': name})
 
+    def join_legacy(self, endpoint, room, name):
+        self.cancel()
+        self.integrated = False
+        self.connect(endpoint, {'type': 'join_room', 'room': room, 'name': name})
+
     def message(self, message):
         kind = message.get('type')
         if kind in ('room_created', 'room_joined'):

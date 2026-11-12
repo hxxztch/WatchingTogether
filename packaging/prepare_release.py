@@ -41,6 +41,8 @@ def main():
     tag_commit = tag.stdout.strip() if tag.returncode == 0 else None
     result = plan(version, os.environ["GITHUB_SHA"], tag_commit, release,
                   os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
+    if os.environ.get('REPUBLISH_VERSION') == version:
+        result = {'version': version, 'publish': True, 'build': True}
     if result["build"]:
         lines = (ROOT / "更新日志.txt").read_text(encoding="utf-8").splitlines()
         if not lines or not lines[0].startswith(version + "（"):
