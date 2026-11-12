@@ -111,9 +111,11 @@ jobs:
         run: |
           $current = [version]($env:RELEASE_VERSION -replace '^(beta|test)', '')
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          $latestStable = $releases | Where-Object { $_.tag_name -match '^beta\d+\.\d+\.\d+$' } | Sort-Object { [version]($_.tag_name -replace '^beta', '') } -Descending | Select-Object -First 1
           foreach ($release in $releases) {
             $old = [string]$release.tag_name
             if ($old -notmatch '^(beta|test)\d+\.\d+\.\d+$' -or $old -eq $env:RELEASE_VERSION) { continue }
+            if ($env:RELEASE_VERSION.StartsWith('test') -and $old.StartsWith('beta') -and $old -ne $latestStable.tag_name) { continue }
             if ([version]($old -replace '^(beta|test)', '') -gt $current) { continue }
             if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
             $oldZip = Join-Path $env:RUNNER_TEMP "$old.zip"
