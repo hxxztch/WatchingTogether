@@ -10,12 +10,14 @@ permissions:
 
 concurrency:
   group: beta-release
-  cancel-in-progress: false
+  # Explicit maintenance retries may cancel a stalled run; ordinary pushes never do.
+  cancel-in-progress: ${{ contains(github.event.head_commit.message, '[retry-stalled-mirror]') }}
 
 jobs:
   sync_source:
     if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
     runs-on: windows-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - name: Mirror beta source to Gitee
@@ -35,7 +37,6 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
-    needs: sync_source
     if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
     runs-on: windows-latest
     outputs:
