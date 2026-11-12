@@ -20,6 +20,8 @@ _IMG_PATH = _os.path.join(_BASE, "assets", "img.png")
 class RoomPanel(QWidget):
     """Side panel for room management."""
 
+    share_requested = Signal()
+    invitation_detected = Signal(str)
     create_requested = Signal(str)
     join_requested = Signal(str, str)
     leave_requested = Signal()
@@ -120,7 +122,8 @@ class RoomPanel(QWidget):
         join_row = QHBoxLayout()
         self._room_input = QLineEdit()
         self._room_input.setPlaceholderText("例如 1234")
-        self._room_input.setMaxLength(4)
+        self._room_input.setMaxLength(8192)
+        self._room_input.textEdited.connect(self._detect_pasted_invitation)
         join_row.addWidget(self._room_input)
         join_btn = QPushButton("加入")
         join_btn.clicked.connect(self._on_join)
@@ -158,9 +161,12 @@ class RoomPanel(QWidget):
         self.lan_address.hide()
         management.addWidget(self.lan_address)
         management.addWidget(self.invitation)
-        self.copy_invitation = QPushButton('复制邀请链接')
+        self.copy_invitation = QPushButton('分享房间')
         self.copy_invitation.setEnabled(False)
-        self.copy_invitation.clicked.connect(lambda: QApplication.clipboard().setText(self.invitation.text()))
+        self.copy_invitation.clicked.connect(self.share_requested)
+        self.copy_link = QPushButton('仅复制链接')
+        self.copy_link.clicked.connect(lambda: QApplication.clipboard().setText(self.invitation.text()))
+        management.addWidget(self.copy_link, alignment=Qt.AlignLeft)
         management.addWidget(self.copy_invitation, alignment=Qt.AlignLeft)
         self.tunnel_status = QLabel()
         self.tunnel_status.setWordWrap(True)
@@ -242,7 +248,7 @@ class RoomPanel(QWidget):
         self._connection_toggle.setVisible(legacy)
         self._current_server.setVisible(legacy)
         self._connection_body.setVisible(legacy and self._connection_toggle.isChecked())
-        self._room_input.setMaxLength(4 if legacy else 2048)
+        self._room_input.setMaxLength(8192)
         self._room_input.setPlaceholderText('例如 1234' if legacy else '粘贴完整邀请链接')
         self._update_invitation_visibility()
         self._connection_help.setText(
@@ -260,6 +266,7 @@ class RoomPanel(QWidget):
         available = self.mode.currentIndex() != 2 and bool(self.invitation.text())
         self.invitation.setVisible(available)
         self.copy_invitation.setVisible(available)
+        self.copy_link.setVisible(available)
 
     def set_busy(self, busy):
         self.cancel_button.setText('取消连接' if busy and not self._in_room else '离开房间')
@@ -315,7 +322,15 @@ class RoomPanel(QWidget):
         self._save_config()
         self.create_requested.emit(name)
 
+    def _detect_pasted_invitation(self, text):
+        if 'ws://' in text or 'wss://' in text:
+            self.invitation_detected.emit(text)
+
     def _on_join(self):
+        text = self._room_input.text().strip()
+        if 'ws://' in text or 'wss://' in text:
+            self.invitation_detected.emit(text)
+            return
         if self._in_room:
             QMessageBox.information(self, '提示', '您已在房间中，请先退出')
             return

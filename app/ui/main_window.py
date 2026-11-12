@@ -220,6 +220,8 @@ class MainWindow(QMainWindow):
         from app.p2p.controller import P2PController
         self._p2p = P2PController(self)
         self._room_panel.p2p_retry.clicked.connect(self._p2p.retry)
+        from app.ui.room_share import RoomShareController
+        self._sharing = RoomShareController(self)
         app = QApplication.instance()
         if app:
             app.installEventFilter(self)
@@ -1196,6 +1198,7 @@ class MainWindow(QMainWindow):
             self._room_panel.set_status('字幕移除失败，请稍后重试。', '#b36b4a')
 
     def closeEvent(self, event):
+        self._sharing.stop()
         self._p2p.leave()
         record_action("client.close")
         self._closing = True
