@@ -31,8 +31,9 @@ RELEASES_API = SOURCES['github'].api_url
 RELEASES_FEED = SOURCES['github'].feed_url
 RELEASES_PAGE = SOURCES['github'].page_url
 ASSET_PREFIX = RELEASES_PAGE + '/download/'
-VERSION_PATTERN = r'(?:beta|v)\d+\.\d+\.\d+'
-_VERSION = re.compile(r'^(beta|v)(\d+)\.(\d+)\.(\d+)$')
+CHANNELS = {'stable': '稳定版', 'test': '测试版（P2P）'}
+VERSION_PATTERN = r'(?:beta|test|v)\d+\.\d+\.\d+'
+_VERSION = re.compile(r'^(beta|test|v)(\d+)\.(\d+)\.(\d+)$')
 _DIGEST = re.compile(r'^sha256:[0-9a-fA-F]{64}$')
 MANIFEST_START = '<!-- WatchingTogether-Update:'
 MANIFEST_END = ' -->'
@@ -161,18 +162,28 @@ def _asset(assets, name, source):
     return item, tuple(parts)
 
 
-def find_update(releases, current=CLIENT_VERSION, source='github'):
+def channel_for_version(version):
+    return 'test' if version.startswith('test') else 'stable'
+
+
+def find_update(releases, current=CLIENT_VERSION, source='github', channel=None):
     installed = version_key(current)
     if installed is None or source not in SOURCES:
         raise ValueError('Unknown client version or update source')
     newest = None
-    newest_version = installed[1]
+    channel = channel or channel_for_version(current)
+    if channel not in CHANNELS:
+        raise ValueError('Unknown update channel')
+    switching = channel != channel_for_version(current)
+    prefix = 'test' if channel == 'test' else ('v' if installed[0] == 'v' else 'beta')
+    newest_version = None if switching else installed[1]
     for item in releases:
         if not isinstance(item, dict) or item.get('draft'):
             continue
         tag = item.get('tag_name', '')
         parsed = version_key(tag)
-        if parsed is None or parsed[0] != installed[0] or parsed[1] <= newest_version:
+        if (parsed is None or parsed[0] != prefix or
+                (newest_version is not None and parsed[1] <= newest_version)):
             continue
         page_url = item.get('html_url', '')
         page_prefix = SOURCES[source].page_url + ('/tag/' if source == 'github' else '/')

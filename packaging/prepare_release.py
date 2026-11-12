@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def plan(version, commit, tag_commit, release, manual=False):
-    if not re.fullmatch(r"beta\d+\.\d+\.\d+", version):
+    if not re.fullmatch(r"(?:beta|test)\d+\.\d+\.\d+", version):
         raise ValueError("CLIENT_VERSION must have the form betaX.Y.Z")
     complete = release and not release.get("draft") and any(
         a.get("name") == version + ".zip" for a in release.get("assets", []))
@@ -27,7 +27,7 @@ def main():
     namespace = {}
     exec((ROOT / "app/version.py").read_text(encoding="utf-8"), namespace)
     version = namespace["CLIENT_VERSION"]
-    if not re.fullmatch(r"beta\d+\.\d+\.\d+", version):
+    if not re.fullmatch(r"(?:beta|test)\d+\.\d+\.\d+", version):
         raise ValueError("Invalid CLIENT_VERSION")
     repo, token = os.environ["GITHUB_REPOSITORY"], os.environ["GH_TOKEN"]
     try:

@@ -8,7 +8,7 @@ import shutil
 import zipfile
 
 
-VERSION = re.compile(r"^beta\d+\.\d+\.\d+$")
+VERSION = re.compile(r"^(?:beta|test)\d+\.\d+\.\d+$")
 EXCLUDED = {"config.json", "crash.log", "crash.log.1", "crash.log.2",
             "crash.log.3", "fatal.log", "fatal.log.1"}
 

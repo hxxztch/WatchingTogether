@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
-TAG = re.compile(r"^beta\d+\.\d+\.\d+$")
+TAG = re.compile(r"^(?:beta|test)\d+\.\d+\.\d+$")
 BRANCH = "update-feed"
 PATH = "releases.json"
 
@@ -31,6 +31,7 @@ def make_feed(releases):
         if not any(asset["name"] == tag + ".zip" for asset in assets):
             continue
         result.append({"tag_name": tag, "html_url": release["html_url"],
+                       "channel": "test" if tag.startswith("test") else "stable",
                        "assets": assets})
     return result
 

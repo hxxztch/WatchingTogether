@@ -150,6 +150,7 @@ def main():
             host._switch_page(0)
             wait(lambda: host._pip.isVisible())
             with patch.object(sys, '_MEIPASS', directory, create=True), \
+                    patch.object(sys, 'frozen', True, create=True), \
                     patch('app.ui.settings.subprocess.Popen') as launch, \
                     patch.object(QApplication, 'quit') as quit_app:
                 settings.install_update()
