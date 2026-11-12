@@ -165,6 +165,10 @@ def run(report_path, server_url=None):
                     host._on_leave_room()
                     wait_for(lambda: not guest._room_code and not guest._network.isRunning())
                     result['checks'].append('embedded server in client, authenticated invitation, owner disband')
+                    if CLIENT_VERSION.startswith('test'):
+                        from app.p2p.package_probe import check
+                        check(host, guest, Path(folder), wait_for)
+                        result['checks'].append('bundled WebRTC/AV native video delivery, pause and P2P teardown')
                 if getattr(sys, 'frozen', False):
                     import hashlib
                     import subprocess
