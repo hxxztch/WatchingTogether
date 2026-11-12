@@ -28,7 +28,9 @@ for release in releases:
     entry['assets'] = filtered
     encoded = base64.b64encode(json.dumps(entry, ensure_ascii=False).encode()).decode()
     body = body.split(MANIFEST_START, 1)[0] + MANIFEST_START + encoded + MANIFEST_END
-    gitee.api('PATCH', '/releases/' + str(release['id']), {'body': body})
+    gitee.api('PATCH', '/releases/' + str(release['id']), {
+        'tag_name': release['tag_name'], 'name': release.get('name') or release['tag_name'],
+        'prerelease': 'true' if release.get('prerelease') else 'false', 'body': body})
     for asset in gitee.api('GET', '/releases/{}/attach_files'.format(release['id']), {'per_page': 100}):
         if asset['name'].startswith(prefix):
             gitee.api('DELETE', '/releases/{}/attach_files/{}'.format(release['id'], asset['id']))
