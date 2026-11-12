@@ -76,6 +76,8 @@ def make_share(link, host='', watching='同步观影', connection='公共通道'
     invitation = parse_share(link)
     def line(value):
         return str(value).replace('\r', ' ').replace('\n', ' ')[:64]
+    details = ('服务器地址：' + invitation.endpoint + '\n房间号：' + invitation.room + '\n'
+               if invitation.legacy else '')
     return '\n'.join((HEADER, '邀请人：' + line(host or '朋友'), '观影模式：' + line(watching),
                       '连接方式：' + line(connection), '', '邀请链接：' + invitation.link,
-                      '', '复制这段信息，打开超时空会夜机客户端即可识别。'))
+                      details, '复制这段信息，打开超时空会夜机客户端即可识别。'))
