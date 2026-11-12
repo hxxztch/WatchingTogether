@@ -68,7 +68,7 @@ class RoomController(QObject):
     def _host_ready(self, url, port):
         if self.sender() is not self.host:
             return
-        self.connect(url, {'type': 'create_room', 'name': self.name})
+        self.connect(url, {'type': 'create_room', 'name': self.name, 'watch_mode': self.panel.watch_mode.currentData()})
 
     def join(self, invitation, name):
         try:
@@ -167,6 +167,8 @@ class RoomController(QObject):
         self.panel.set_status('连接房间超时，请检查邀请链接和网络后重试。', '#b36b4a')
 
     def cancel(self):
+        if hasattr(self.owner, '_p2p'):
+            self.owner._p2p.leave()
         self._finish_loading()
         self.timer.stop()
         self.pending = None

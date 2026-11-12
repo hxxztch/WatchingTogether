@@ -110,7 +110,7 @@ class NetworkClient(QThread):
                     if self._session:
                         self._membership_pending = True
                         if self._session.get("token"):
-                            self._put({"type": "resume_room", "protocol": 2, **self._session, 'chat_media_bytes': MAX_MESSAGE_BYTES})
+                            self._put({"type": "resume_room", "p2p": int(bool(self._session.get('p2p'))), "protocol": 2, **self._session, 'chat_media_bytes': MAX_MESSAGE_BYTES})
                         else:
                             self._put({"type": "join_room", "protocol": 2, **self._session, 'chat_media_bytes': MAX_MESSAGE_BYTES})
                     tasks = [asyncio.create_task(self._receive_loop(ws)),
@@ -219,6 +219,8 @@ class NetworkClient(QThread):
                 return
             message["protocol"] = 2
             message['chat_media_bytes'] = MAX_MESSAGE_BYTES
+            from app.p2p import available
+            message['p2p'] = int(available())
             self._membership_pending = self._put(message)
             return
         if not self._ready:
@@ -288,7 +290,8 @@ class NetworkClient(QThread):
                 return
             self._membership_pending = False
             self._session = {"room": msg["room"], "name": msg.get("name", ""),
-                             "token": msg.get("token"), "chat_seq": msg.get("chat_seq", 0)}
+                             "token": msg.get("token"), "chat_seq": msg.get("chat_seq", 0),
+                             "p2p": msg.get('watch_mode') == 'p2p'}
             self._protocol = msg.get("protocol", 1)
             self._ready = True
             self._disconnected_since = None

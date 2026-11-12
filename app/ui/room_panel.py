@@ -59,6 +59,19 @@ class RoomPanel(QWidget):
         self.mode = QComboBox()
         self.mode.addItems(['异地联机 · 公共通道（试用）', '同一局域网 · 直接连接', '原服务器 / 外部内网穿透'])
         management.addWidget(self.mode)
+        self.watch_mode = QComboBox()
+        self.watch_mode.addItem('同步观影 · 各自准备片源', 'sync')
+        self.watch_mode.addItem('房主推流 · P2P（局域网 / 本地视频）', 'p2p')
+        self.watch_mode.setToolTip('创建房间时选择。加入房间后使用房主设定的观影模式。')
+        self.watch_mode.currentIndexChanged.connect(self._mode_changed)
+        management.addWidget(self.watch_mode)
+        self.p2p_status = QLabel()
+        self.p2p_status.setWordWrap(True)
+        self.p2p_status.setTextFormat(Qt.PlainText)
+        management.addWidget(self.p2p_status)
+        self.p2p_retry = QPushButton('重试媒体直连')
+        self.p2p_retry.hide()
+        management.addWidget(self.p2p_retry, alignment=Qt.AlignLeft)
 
         title = QLabel("聊天室")
         title.setAlignment(Qt.AlignLeft)
@@ -236,7 +249,7 @@ class RoomPanel(QWidget):
             ('所有成员填写相同的服务器地址，创建后分享四位房间号，朋友输入房间号加入。'
              if legacy else
              '创建房间后分享完整邀请链接，朋友粘贴即可加入。房主退出时房间解散。') +
-            '\n每位成员自行打开视频，房间同步播放进度和聊天。')
+            ('\n仅房主打开本地视频，成员自动接收。第一阶段仅支持同一局域网。' if self.watch_mode.currentData() == 'p2p' else '\n每位成员自行打开视频，房间同步播放进度和聊天。'))
 
     def set_invitation(self, value):
         self.invitation.setText(value)
@@ -252,6 +265,7 @@ class RoomPanel(QWidget):
         self.cancel_button.setText('取消连接' if busy and not self._in_room else '离开房间')
         self._entry.setEnabled(self._in_room or not busy)
         self.mode.setEnabled(not busy)
+        self.watch_mode.setEnabled(not busy and not self._in_room)
         self._connection_body.setEnabled(not busy)
 
     def update_server_label(self, url: str):
@@ -329,6 +343,7 @@ class RoomPanel(QWidget):
         if in_room and not self._in_room:
             self._connection_toggle.setChecked(False)
         self._in_room = in_room
+        self.watch_mode.setEnabled(not in_room)
         self._entry.setVisible(True)
         self.set_busy(in_room)
         self.room_code_label.setText(f'房间号：{room_code}' if in_room else '尚未加入房间')

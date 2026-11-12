@@ -75,6 +75,7 @@ class Member:
     def __init__(self, name, peer):
         self.name = name
         self.requested_name = name
+        self.peer_id = secrets.token_hex(16)
         self.token = secrets.token_urlsafe(32)
         self.peer = peer
         self.expires = None
@@ -86,6 +87,9 @@ class Room:
     def __init__(self, code):
         self.code = code
         self.members = {}
+        self.watch_mode = 'sync'
+        self.publisher_id = None
+        self.stream = {'active': False}
         self.position = 0.0
         self.playing = False
         self.updated_at = time.monotonic()
@@ -197,9 +201,61 @@ class Server:
         else:
             member.expires = time.monotonic() + self.grace_period
         self.broadcast(room, {"type": "member_left", "name": member.name,
-                              "members": room.member_names})
+                              "members": room.member_names, "peer_id": member.peer_id})
         if not room.members:
             self.rooms.pop(room.code, None)
+
+    def _p2p(self, room, member, msg):
+        if room.watch_mode != 'p2p':
+            raise ValueError('This is not a P2P room')
+        publisher = next((m for m in room.members.values() if m.peer_id == room.publisher_id), None)
+        if publisher is None or publisher.peer is None:
+            raise ValueError('Publisher is offline')
+        kind = msg['type']
+        if kind == 'p2p_ready':
+            if member is publisher:
+                raise ValueError('Publisher cannot subscribe to itself')
+            publisher.peer.send({'type': kind, 'from_peer': member.peer_id})
+        elif kind == 'p2p_state':
+            if member is not publisher:
+                raise ValueError('Only the publisher can change stream state')
+            if not isinstance(msg.get('active'), bool):
+                raise ValueError('Invalid stream state')
+            state = {'active': False}
+            if msg['active']:
+                stream_id = msg.get('stream_id')
+                if not isinstance(stream_id, str) or len(stream_id) != 32 or any(c not in '0123456789abcdef' for c in stream_id):
+                    raise ValueError('Invalid stream identity')
+                if not isinstance(msg.get('title'), str) or len(msg['title']) > 240 or not isinstance(msg.get('playing'), bool):
+                    raise ValueError('Invalid stream metadata')
+                duration, position = self._position(msg.get('duration')), self._position(msg.get('position'))
+                if duration > 1000000 or position > 1000000:
+                    raise ValueError('Invalid media duration')
+                state = {'active': True, 'stream_id': stream_id, 'title': msg['title'],
+                         'duration': duration, 'position': position, 'playing': msg['playing']}
+            room.stream = state
+            self.broadcast(room, {'type': kind, 'stream': dict(state)})
+        elif kind == 'p2p_signal':
+            target = next((m for m in room.members.values() if m.peer_id == msg.get('target')), None)
+            if target is None or target is member or target.peer is None:
+                raise ValueError('Media peer is unavailable')
+            if member is not publisher and target is not publisher:
+                raise ValueError('Viewer-to-viewer signaling is not allowed')
+            signal_kind = msg.get('kind')
+            if signal_kind != ('offer' if member is publisher else 'answer'):
+                raise ValueError('Invalid signaling direction')
+            if not room.stream.get('active') or msg.get('stream_id') != room.stream.get('stream_id'):
+                raise ValueError('Stream session expired')
+            sdp, connection_id = msg.get('sdp'), msg.get('connection_id')
+            if not isinstance(sdp, str) or not 0 < len(sdp) <= 65536:
+                raise ValueError('Invalid session description')
+            if not isinstance(connection_id, str) or len(connection_id) != 32 or any(c not in '0123456789abcdef' for c in connection_id):
+                raise ValueError('Invalid connection identity')
+            target.peer.send({'type': kind, 'kind': signal_kind, 'sdp': sdp,
+                              'stream_id': room.stream['stream_id'], 'connection_id': connection_id,
+                              'from_peer': member.peer_id})
+        else:
+            raise ValueError('Unknown P2P message')
 
     @staticmethod
     def _position(value):
@@ -236,6 +292,8 @@ class Server:
                     if not isinstance(msg, dict):
                         raise ValueError("Message must be an object")
                     mtype = msg.get("type")
+                    if not isinstance(mtype, str):
+                        raise ValueError('Invalid message type')
                     if mtype in ("create_room", "join_room", "resume_room"):
                         self._expire()
                         if member is not None:
@@ -251,6 +309,8 @@ class Server:
                                 continue
                             if self.hosted and restored.token == self.owner_token and not peer.is_host:
                                 raise ValueError("Host connection required")
+                            if candidate.watch_mode == 'p2p' and msg.get('p2p') != 1:
+                                raise ValueError('This room requires a P2P-capable client')
                             cursor = max(0, min(candidate.chat_seq, int(msg.get("chat_seq", 0))))
                             room, member = candidate, restored
                             old_peer = member.peer
@@ -265,21 +325,33 @@ class Server:
                             if mtype == "create_room":
                                 if self.hosted and (not peer.is_host or self.rooms):
                                     raise ValueError("Only the host can create this room")
+                                mode = msg.get('watch_mode', 'sync')
+                                if mode not in ('sync', 'p2p'):
+                                    raise ValueError('Unknown watching mode')
+                                if mode == 'p2p' and (not self.hosted or msg.get('p2p') != 1):
+                                    raise ValueError('P2P requires an embedded host and compatible client')
                                 room = Room(self._generate_code())
+                                room.watch_mode = mode
                                 self.rooms[room.code] = room
                             else:
                                 room = self.rooms.get(msg.get("room"))
                                 if room is None:
                                     raise ValueError("Room not found")
+                            if room.watch_mode == 'p2p' and msg.get('p2p') != 1:
+                                raise ValueError('This room requires Python 3.11+ and requirements-p2p.txt')
                             member = Member(name, peer)
                             member.name = room.available_name(member.requested_name)
                             room.members[member.token] = member
+                            if mtype == 'create_room':
+                                room.publisher_id = member.peer_id
                             if self.hosted and mtype == "create_room":
                                 self.owner_token = member.token
                             cursor = room.chat_seq
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
                                    "room": room.code, "name": member.name,
                                    "token": member.token, "protocol": 2,
+                                   "peer_id": member.peer_id, "publisher_id": room.publisher_id,
+                                   "watch_mode": room.watch_mode, "stream": room.stream,
                                    "chat_seq": cursor, "chat_images": True, "chat_gifs": True,
                                    "chat_media_bytes": MAX_MESSAGE_BYTES,
                                    "resumed": mtype == "resume_room", "members": room.member_names,
@@ -292,7 +364,7 @@ class Server:
                                 if event["seq"] > cursor and sender_token != member.token:
                                     peer.send(event)
                         self.broadcast(room, {"type": "member_joined", "name": member.name,
-                                              "members": room.member_names}, exclude=member)
+                                              "members": room.member_names, "peer_id": member.peer_id}, exclude=member)
                         continue
 
                     if mtype == "leave_room":
@@ -310,6 +382,16 @@ class Server:
                         peer.send({"type": "ack", "id": message_id})
                         continue
 
+                    if mtype.startswith('p2p_'):
+                        self._p2p(room, member, msg)
+                        if message_id:
+                            seen[message_id] = True
+                            while len(seen) > 512:
+                                seen.popitem(last=False)
+                            peer.send({'type': 'ack', 'id': message_id})
+                        continue
+                    if room.watch_mode == 'p2p' and mtype in ('load', 'play', 'pause', 'seek', 'seek_rel', 'sync_push', 'key_press'):
+                        raise ValueError('P2P playback is controlled by the publisher')
                     if mtype == "sync_request":
                         peer.send({"type": "sync_state", "room": room.code,
                                    "request_id": msg.get("request_id"), "state": room.snapshot()})

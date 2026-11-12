@@ -9,7 +9,7 @@ import base64
 import threading
 from PySide6.QtGui import QIcon, QPixmap
 
-from app.player import MpvWidget
+from app.playback_backend import PlaybackWidget as MpvWidget
 from app.network import NetworkClient
 from app.sync import PlaybackSynchronizer
 from app.bilibili import BilibiliClient, BilibiliError, QualityUnavailable
@@ -217,6 +217,9 @@ class MainWindow(QMainWindow):
         self._fs_mouse_timer.start(100)
         self._controls_hide_delay = 1800
 
+        from app.p2p.controller import P2PController
+        self._p2p = P2PController(self)
+        self._room_panel.p2p_retry.clicked.connect(self._p2p.retry)
         app = QApplication.instance()
         if app:
             app.installEventFilter(self)
@@ -248,6 +251,10 @@ class MainWindow(QMainWindow):
             self._player.set_volume(vol)
 
     def _on_stop(self):
+        if self._p2p.active:
+            if self._p2p.host:
+                self._p2p.worker.submit('stop')
+            return
         self._invalidate_quality_request()
         self._bili_info = None
         self._controls.set_video_quality("", None)
@@ -259,6 +266,8 @@ class MainWindow(QMainWindow):
         self._controls.set_media_title('尚未打开视频')
 
     def _on_audio_select(self, track_id):
+        if self._p2p.active:
+            return
         self._player.set_audio_track(track_id)
 
     def _refresh_audio_tracks(self):
@@ -283,6 +292,7 @@ class MainWindow(QMainWindow):
         if self._network._stopping.is_set():
             return
         self._room_ready = False
+        self._p2p.leave()
         self._player.set_speed(1.0)
         self._room_panel.set_latency(None)
         self._room_panel.set_status("连接中断，正在自动重连...", "#FFD54F")
@@ -294,7 +304,7 @@ class MainWindow(QMainWindow):
             self._room_panel.set_latency(milliseconds)
 
     def _apply_room_state(self, state, force=False):
-        if not self._room_ready or self._player.is_loading:
+        if self._p2p.active or not self._room_ready or self._player.is_loading:
             return
         try:
             plan = self._playback_sync.plan(
@@ -342,14 +352,17 @@ class MainWindow(QMainWindow):
                 self._room_panel.set_status(
                     ("已恢复房间 " if msg.get("resumed") else "已加入房间 ") + self._room_code,
                     "#4CAF50")
+                self._p2p.enter(msg)
                 self._apply_room_state(msg.get("state", {}), force=True)
             elif mtype == "left_room":
+                self._p2p.leave()
                 self._room_code = ""
                 self._room_ready = False
                 self._player.set_speed(1.0)
                 self._room_panel.set_in_room(False)
                 self._room_panel.set_status("已离开房间", "#999")
             elif mtype in ("session_expired", "room_closed"):
+                self._p2p.leave()
                 self._room_code = ""
                 self._room_ready = False
                 self._player.set_speed(1.0)
@@ -390,6 +403,7 @@ class MainWindow(QMainWindow):
                     self._apply_room_state(msg.get("state", {}))
             elif mtype == "error":
                 QMessageBox.warning(self, "错误", msg.get("message", ""))
+            self._p2p.message(msg)
         finally:
             self._syncing = False
 
@@ -400,6 +414,14 @@ class MainWindow(QMainWindow):
             avid, cid, qn, headers, cookie=load_config().get("bili_cookie", ""), strict=strict)
 
     def _on_create_room(self, name):
+        if self._room_panel.watch_mode.currentData() == 'p2p':
+            from app.p2p import available
+            if not available():
+                self._room_panel.set_status('P2P 推流需要 Python 3.11+；请安装 requirements-p2p.txt', '#b36b4a')
+                return
+            if self._room_panel.mode.currentIndex() != 1:
+                self._room_panel.set_status('第一阶段 P2P 推流请选择「同一局域网 · 直接连接」', '#95724f')
+                return
         record_action("room.create", mode=self._room_panel.mode.currentIndex())
         self._my_name = name
         if self._room_panel.mode.currentIndex() != 2:
@@ -550,6 +572,10 @@ class MainWindow(QMainWindow):
         self._danmaku.show_danmaku('我', '[图片]', image)
 
     def _on_toggle_play(self):
+        if self._p2p.active:
+            if self._p2p.host:
+                self._p2p.worker.submit('pause', paused=self._player.is_playing)
+            return
         if self._player.is_playing:
             pos = self._player.position
             self._player.pause()
@@ -562,6 +588,10 @@ class MainWindow(QMainWindow):
                 self._network.send({"type": "play", "position": pos})
 
     def _on_seek(self, pos):
+        if self._p2p.active:
+            if self._p2p.host and self._player.duration > 0:
+                self._p2p.worker.submit('seek', position=max(0, min(float(pos), self._player.duration)))
+            return
         if self._player.is_loading or self._player.duration <= 0:
             self._room_panel.set_status("请等待视频加载完成后再跳转", "#FFD54F")
             return
@@ -570,6 +600,9 @@ class MainWindow(QMainWindow):
             self._network.send({"type": "seek", "position": pos})
 
     def _on_load_file(self, path):
+        if self._p2p.active:
+            self._p2p.open(path)
+            return
         record_action("media.open", source="local")
         self._controls.set_media_title(_os.path.basename(path.replace('\\', '/')), '本地视频')
         self._empty_stage.hide()
@@ -683,6 +716,9 @@ class MainWindow(QMainWindow):
         return None
 
     def _on_load_url(self, url):
+        if self._p2p.active:
+            self._room_panel.set_status('第一阶段 P2P 推流支持本地视频，网页片源将在后续接入', '#95724f')
+            return
         record_action("media.open", source="url")
         """Load from URL.  B站 videos use unified DASH-first path."""
         from urllib.parse import urlsplit, unquote
@@ -890,6 +926,10 @@ class MainWindow(QMainWindow):
 
     def _on_hotkey(self, action):
         if action in ("left", "right"):
+            if self._p2p.active:
+                if self._p2p.host:
+                    self._on_seek(self._player.position + (-5 if action == 'left' else 5))
+                return
             delta = -5.0 if action == "left" else 5.0
             if self._room_code:
                 if not self._room_ready:
@@ -1133,6 +1173,9 @@ class MainWindow(QMainWindow):
             self._import_subtitle(path)
 
     def _import_subtitle(self, path):
+        if self._p2p.active:
+            self._room_panel.set_status('当前 P2P 片源尚未接入共享字幕', '#95724f')
+            return
         record_action("subtitle.import")
         try:
             self._player.load_subtitle(path)
@@ -1153,6 +1196,7 @@ class MainWindow(QMainWindow):
             self._room_panel.set_status('字幕移除失败，请稍后重试。', '#b36b4a')
 
     def closeEvent(self, event):
+        self._p2p.leave()
         record_action("client.close")
         self._closing = True
         self._shell.settings.stop()
