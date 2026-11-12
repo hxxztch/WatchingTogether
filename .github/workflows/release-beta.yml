@@ -66,18 +66,23 @@ jobs:
           lfs: true
           fetch-depth: 0
       - uses: conda-incubator/setup-miniconda@v4
+        if: ${{ !startsWith(needs.plan.outputs.version, 'test') }}
         with:
           python-version: ${{ startsWith(needs.plan.outputs.version, 'test') && '3.11.9' || '3.8.20' }}
           activate-environment: build
           auto-activate: true
           channels: conda-forge
           conda-remove-defaults: true
+      - uses: actions/setup-python@v5
+        if: ${{ startsWith(needs.plan.outputs.version, 'test') }}
+        with:
+          python-version: '3.11.9'
       - name: Install pinned packages
         shell: pwsh
         run: |
           python -m pip install pip==25.0.1
           python -m pip install -r packaging/requirements-lock.txt
-          if ($env:RELEASE_VERSION.StartsWith('test')) { python -m pip install -r requirements-p2p.txt }
+          if ($env:RELEASE_VERSION.StartsWith('test')) { python -m pip install -r requirements-p2p.txt python-mpv==1.0.8 }
           python -m pip check
       - name: Run unit tests
         if: needs.plan.outputs.build == 'true'
