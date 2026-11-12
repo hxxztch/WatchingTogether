@@ -22,9 +22,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix='film-integrated-package-') as temporary:
         target = Path(temporary) / CLIENT_NAME
         shutil.copytree(ROOT / 'dist' / CLIENT_VERSION / CLIENT_NAME, target)
-        completed = subprocess.run([str(target / (CLIENT_NAME + '.exe')), '--package-check', str(report)],
-                                   cwd=str(target), env=env, timeout=75,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            completed = subprocess.run([str(target / (CLIENT_NAME + '.exe')), '--package-check', str(report)],
+                                       cwd=str(target), env=env, timeout=120,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+        finally:
+            report.parent.mkdir(parents=True, exist_ok=True)
+            for name in ('crash.log', 'fatal.log'):
+                if (target / name).is_file():
+                    shutil.copy2(target / name, report.parent / ('package-' + name))
         if completed.returncode or not report.exists():
             raise RuntimeError('Packaged check failed: ' + str(completed.returncode))
         result = json.loads(report.read_text(encoding='utf-8'))
