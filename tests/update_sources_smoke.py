@@ -48,6 +48,10 @@ def main():
             'browser_download_url': base + '3/change.delta.zip', 'digest': sha(delta), 'size': len(delta)}
     release = {'tag_name': NEXT_VERSION, 'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + NEXT_VERSION,
                'assets': [full, diff]}
+    test_version = 'test' + NEXT_VERSION[4:]
+    test_release = {'tag_name': test_version,
+        'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + test_version,
+        'assets': [dict(full, name=test_version + '.zip')]}
     state = {'bad': False, 'fail_feed': False}
     calls = []
 
@@ -58,7 +62,7 @@ def main():
             status = 200
             if path.endswith('/contents/releases.json'):
                 status = 404 if state['fail_feed'] else 200
-                content = json.dumps({'encoding': 'base64', 'content': base64.b64encode(json.dumps([release]).encode()).decode()}).encode()
+                content = json.dumps({'encoding': 'base64', 'content': base64.b64encode(json.dumps([release, test_release]).encode()).decode()}).encode()
             elif path.endswith('/releases'):
                 body = MANIFEST_START + base64.b64encode(json.dumps(release).encode()).decode() + MANIFEST_END
                 content = json.dumps([{'tag_name': NEXT_VERSION, 'body': body}]).encode()
@@ -101,12 +105,20 @@ def main():
         with tempfile.TemporaryDirectory() as temporary, patch.object(SettingsPage, '_request', local_request), \
                 patch.object(QStandardPaths, 'writableLocation', return_value=temporary):
             config.CONFIG_PATH = str(Path(temporary) / 'config.json')
+            config.save(update_channel='stable')
             page = SettingsPage()
             page.show()
             assert page.source_combo.currentData() == 'gitee'
             page.check_updates()
             wait(lambda: page._check_reply is None)
             assert page._release and page._release.source == 'gitee'
+            page.channel_combo.setCurrentIndex(page.channel_combo.findData('test'))
+            wait(lambda: page._check_reply is None)
+            assert page._release.tag == test_version and not page._release.delta_url
+            assert config.load()['update_channel'] == 'test'
+            page.channel_combo.setCurrentIndex(page.channel_combo.findData('stable'))
+            wait(lambda: page._check_reply is None)
+            assert page._release.tag == NEXT_VERSION
             page.download_update()
             assert not page.source_combo.isEnabled()
             wait(lambda: not page._downloading)

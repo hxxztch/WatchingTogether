@@ -2,7 +2,7 @@ name: Publish beta client
 
 on:
   push:
-    branches: ['beta']
+    branches: ['beta', 'codex/p2p-lan-prototype']
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync_source:
-    if: github.ref == 'refs/heads/beta'
+    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,11 +28,11 @@ jobs:
           $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("hxxztch:$env:GITEE_TOKEN"))
           Write-Output "::add-mask::$basic"
           git remote add gitee https://gitee.com/hxxztch/watching-together.git
-          git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee HEAD:refs/heads/beta
+          git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "HEAD:refs/heads/$env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
     needs: sync_source
-    if: github.ref == 'refs/heads/beta'
+    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
     runs-on: windows-latest
     outputs:
       version: ${{ steps.plan.outputs.version }}
@@ -63,7 +63,7 @@ jobs:
           fetch-depth: 0
       - uses: conda-incubator/setup-miniconda@v4
         with:
-          python-version: '3.8.20'
+          python-version: ${{ startsWith(needs.plan.outputs.version, 'test') && '3.11.9' || '3.8.20' }}
           activate-environment: build
           auto-activate: true
           channels: conda-forge
@@ -73,6 +73,7 @@ jobs:
         run: |
           python -m pip install pip==25.0.1
           python -m pip install -r packaging/requirements-lock.txt
+          if ($env:RELEASE_VERSION.StartsWith('test')) { python -m pip install -r requirements-p2p.txt }
           python -m pip check
       - name: Run unit tests
         if: needs.plan.outputs.build == 'true'
@@ -98,11 +99,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $current = [version]($env:RELEASE_VERSION -replace '^beta', '')
+          $current = [version]($env:RELEASE_VERSION -replace '^(beta|test)', '')
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           foreach ($release in $releases) {
             $old = [string]$release.tag_name
-            if ($old -notmatch '^beta\d+\.\d+\.\d+$' -or [version]($old -replace '^beta', '') -ge $current) { continue }
+            if ($old -notmatch '^(beta|test)\d+\.\d+\.\d+$' -or $old -eq $env:RELEASE_VERSION) { continue }
+            if ([version]($old -replace '^(beta|test)', '') -gt $current) { continue }
             if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
             $oldZip = Join-Path $env:RUNNER_TEMP "$old.zip"
             gh release download $old --repo $env:GITHUB_REPOSITORY --pattern "$old.zip" --dir $env:RUNNER_TEMP
@@ -123,7 +125,7 @@ jobs:
           $lines = Get-Content '更新日志.txt' -Encoding UTF8
           if ($lines[0] -notmatch "^$([regex]::Escape($env:RELEASE_VERSION))（") { throw 'The changelog must start with the release tag' }
           $next = 1
-          while ($next -lt $lines.Count -and $lines[$next] -notmatch '^beta\d+\.\d+\.\d+（') { $next++ }
+          while ($next -lt $lines.Count -and $lines[$next] -notmatch '^(beta|test)\d+\.\d+\.\d+（') { $next++ }
           $body = ($lines[1..($next - 1)] -join "`n").Trim()
           if (-not $body) { throw 'Release notes are empty' }
           Set-Content -LiteralPath release-notes.txt -Value $body -Encoding UTF8
@@ -134,8 +136,8 @@ jobs:
           fail_on_unmatched_files: true
           tag_name: ${{ env.RELEASE_VERSION }}
           target_commitish: ${{ github.sha }}
-          prerelease: false
-          make_latest: true
+          prerelease: ${{ startsWith(env.RELEASE_VERSION, 'test') }}
+          make_latest: ${{ startsWith(env.RELEASE_VERSION, 'test') && 'false' || 'true' }}
           body_path: release-notes.txt
       - name: Publish static beta update feed
         shell: pwsh

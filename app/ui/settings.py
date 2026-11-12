@@ -9,17 +9,35 @@ import subprocess
 import sys
 import tempfile
 
-from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal
+from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal, QThread
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkProxyFactory,
                                QNetworkReply, QNetworkRequest)
-from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget, QMessageBox
 
-from app.updates import SOURCES, DEFAULT_SOURCE, decode_release_feed, find_update, valid_download_url
+from app.updates import (SOURCES, DEFAULT_SOURCE, CHANNELS, channel_for_version,
+                         decode_release_feed, find_update, valid_download_url)
 from app.config import load, save
 from app.version import CLIENT_VERSION
 from app.diagnostics import record_action, recent_actions
 from app.ui.shell import card, label
+
+
+class FullUpdateWorker(QThread):
+    def __init__(self, package, install, current, target, digest, parent=None):
+        super().__init__(parent)
+        self.arguments = package, install, current, target, digest
+        self.directory = Path(tempfile.mkdtemp(prefix='wt-full-update-'))
+        self.output = self.directory / 'portable.delta.zip'
+        self.error = ''
+
+    def run(self):
+        try:
+            from app.full_update import prepare_full_update
+            prepare_full_update(*self.arguments, self.output, cancelled=self.isInterruptionRequested)
+        except Exception as exc:
+            self.error = str(exc)
+            shutil.rmtree(str(self.directory), ignore_errors=True)
 
 
 class SettingsPage(QWidget):
@@ -45,6 +63,10 @@ class SettingsPage(QWidget):
         self._automatic = False
         self._closing = False
         self._downloading = False
+        self._prepare_worker = None
+        self._channel = load().get('update_channel', channel_for_version(CLIENT_VERSION))
+        if not isinstance(self._channel, str) or self._channel not in CHANNELS:
+            self._channel = channel_for_version(CLIENT_VERSION)
         self._source = load().get('update_source', DEFAULT_SOURCE)
         if self._source not in SOURCES:
             self._source = DEFAULT_SOURCE
@@ -55,6 +77,17 @@ class SettingsPage(QWidget):
         layout.addWidget(label("设置", "heading"))
         version_card, version_layout = card("版本更新")
         version_layout.addWidget(label("当前版本：" + CLIENT_VERSION, "cardTitle"))
+        channel_row = QHBoxLayout()
+        channel_row.addWidget(label('更新通道'))
+        self.channel_combo = QComboBox()
+        for key, title in CHANNELS.items():
+            self.channel_combo.addItem(title, key)
+        self.channel_combo.setCurrentIndex(self.channel_combo.findData(self._channel))
+        self.channel_combo.currentIndexChanged.connect(self._change_channel)
+        channel_row.addWidget(self.channel_combo)
+        channel_row.addStretch()
+        version_layout.addLayout(channel_row)
+        version_layout.addWidget(label('稳定版沿用现有功能；测试版包含局域网 P2P 房主推流。可随时切回另一通道，保留配置和收藏表情。', 'subtle', True))
         source_row = QHBoxLayout()
         source_row.addWidget(label('更新源'))
         self.source_combo = QComboBox()
@@ -101,34 +134,50 @@ class SettingsPage(QWidget):
         self.folder_button.clicked.connect(self.open_download_folder)
         version_layout.addWidget(self.folder_button)
         version_layout.addWidget(label(
-            "便携版优先下载差异文件，在退出客户端后安装；源码运行时可下载完整便携包。",
+            "便携版优先使用差异包；跨通道无对应差异包时使用完整包安装。源码运行时仅下载，不覆盖源码。",
             "subtle", True))
         layout.addWidget(version_card)
         layout.addStretch()
+
+    def _change_channel(self, *_):
+        selected = self.channel_combo.currentData()
+        if selected == self._channel:
+            return
+        if self._downloading or self._prepare_worker or not save(update_channel=selected):
+            self.channel_combo.blockSignals(True)
+            self.channel_combo.setCurrentIndex(self.channel_combo.findData(self._channel))
+            self.channel_combo.blockSignals(False)
+            self.status.setText('更新通道未能保存，请稍后重试。')
+            return
+        self._channel = selected
+        self._reset_selection()
 
     def _change_source(self, *_):
         selected = self.source_combo.currentData()
         if selected == self._source:
             return
-        if self._downloading or not save(update_source=selected):
+        if self._downloading or self._prepare_worker or not save(update_source=selected):
             self.source_combo.blockSignals(True)
             self.source_combo.setCurrentIndex(self.source_combo.findData(self._source))
             self.source_combo.blockSignals(False)
             self.status.setText('更新源未能保存，请检查配置目录权限。')
             return
+        self._source = selected
+        self.release_button.setText('查看 ' + SOURCES[selected].name + ' 发布页')
+        self._reset_selection()
+
+    def _reset_selection(self):
         for attr in ('_check_reply', '_manifest_reply'):
             reply = getattr(self, attr)
             setattr(self, attr, None)
             if reply is not None:
                 reply.abort()
-        self._source = selected
         self._release = self._target = None
         self._download_is_delta = False
         for control in (self.release_label, self.diff_files, self.download_button,
                         self.install_button, self.folder_button):
             control.hide()
         self.update_available.emit('')
-        self.release_button.setText('查看 ' + SOURCES[selected].name + ' 发布页')
         self.check_updates()
 
     def _request(self, url, timeout):
@@ -153,7 +202,7 @@ class SettingsPage(QWidget):
         return url
 
     def check_updates(self, automatic=False):
-        if self._closing or self._check_reply is not None or self._downloading:
+        if self._closing or self._check_reply is not None or self._downloading or self._prepare_worker:
             return
         self.check_button.setEnabled(False)
         self._automatic = automatic is True
@@ -184,18 +233,20 @@ class SettingsPage(QWidget):
                 raise OSError("HTTP {}".format(status))
             releases = json.loads(bytes(reply.readAll()).decode("utf-8"))
             releases = decode_release_feed(releases, self._source, api=self._check_source == 'api')
-            self._release = find_update(releases, source=self._source)
+            self._release = find_update(releases, source=self._source, channel=self._channel)
             logging.info("Update check success source=%s latest=%s", self._source + ':' + self._check_source,
                          self._release.tag if self._release else "current")
             if self._release is None:
-                self.status.setText("已是当前通道的最新版本")
+                self.status.setText('已是当前通道的最新版本' if self._channel == channel_for_version(CLIENT_VERSION)
+                                    else '所选通道暂未发布可用版本，请稍后重试。')
                 self.release_label.hide()
                 self.diff_files.hide()
                 self.download_button.hide()
                 self.install_button.hide()
                 self.update_available.emit("")
             else:
-                self.status.setText("发现新版本：" + self._release.tag)
+                switching = self._channel != channel_for_version(CLIENT_VERSION)
+                self.status.setText(('可切换至：' if switching else '发现新版本：') + self._release.tag)
                 self.diff_files.hide()
                 self.install_button.hide()
                 has_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url)
@@ -207,7 +258,7 @@ class SettingsPage(QWidget):
                 self.update_available.emit(self._release.tag)
                 if self._release.manifest_url:
                     self._load_manifest()
-                if has_delta and self._automatic:
+                if has_delta and self._automatic and not switching:
                     self.download_update()
         except (OSError, ValueError, TypeError, KeyError) as exc:
             status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
@@ -272,7 +323,7 @@ class SettingsPage(QWidget):
         reply.deleteLater()
 
     def download_update(self):
-        if self._closing or self._downloading or self._release is None:
+        if self._closing or self._downloading or self._prepare_worker or self._release is None:
             return
         self._download_is_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url)
         record_action("update.download", version=self._release.tag,
@@ -300,6 +351,7 @@ class SettingsPage(QWidget):
         self._downloading = True
         self.download_button.setEnabled(False)
         self.source_combo.setEnabled(False)
+        self.channel_combo.setEnabled(False)
         self.check_button.setEnabled(False)
         self.status.setText("正在下载 " + asset_name + "…")
         self._start_part()
@@ -401,7 +453,7 @@ class SettingsPage(QWidget):
                          self._release.tag, "delta" if self._download_is_delta else "full",
                          self._target.stat().st_size)
             self.folder_button.show()
-            self.install_button.setVisible(self._download_is_delta)
+            self.install_button.setVisible(bool(getattr(sys, 'frozen', False)))
             self._cleanup_download()
         except (OSError, ValueError) as exc:
             logging.warning("Update download failed: %s", exc)
@@ -417,6 +469,7 @@ class SettingsPage(QWidget):
         self._downloading = False
         self.download_button.setEnabled(True)
         self.source_combo.setEnabled(True)
+        self.channel_combo.setEnabled(True)
         self.check_button.setEnabled(True)
         if self._partial and self._partial.exists():
             try:
@@ -425,8 +478,42 @@ class SettingsPage(QWidget):
                 pass
 
     def install_update(self):
-        if not self._download_is_delta or self._target is None or not self._target.is_file():
+        if (self._prepare_worker or self._release is None or self._target is None or
+                not self._target.is_file() or not getattr(sys, 'frozen', False)):
             return
+        if self._channel != channel_for_version(CLIENT_VERSION):
+            if QMessageBox.question(self, '切换版本通道',
+                    '将从 {} 切换至 {}，并退出客户端安装。个人配置和收藏表情将保留，当前房间会退出。是否继续？'.format(
+                        CLIENT_VERSION, self._release.tag)) != QMessageBox.Yes:
+                return
+        if not self._download_is_delta:
+            self.status.setText('正在准备完整包安装，请稍候…')
+            for control in (self.source_combo, self.channel_combo, self.check_button,
+                            self.download_button, self.install_button):
+                control.setEnabled(False)
+            self._prepare_worker = FullUpdateWorker(self._target, Path(sys.executable).resolve().parent,
+                CLIENT_VERSION, self._release.tag, self._expected_digest, self)
+            self._prepare_worker.finished.connect(self._full_update_prepared)
+            self._prepare_worker.start()
+            return
+        self._launch_install(self._target)
+
+    def _full_update_prepared(self):
+        worker = self._prepare_worker
+        self._prepare_worker = None
+        if self._closing:
+            shutil.rmtree(str(worker.directory), ignore_errors=True)
+        elif worker.error:
+            logging.warning('Full update preparation failed: %s', worker.error)
+            self.status.setText('安装准备失败，下载文件已保留。请重试或从发布页下载完整包。')
+        else:
+            self._launch_install(worker.output)
+        for control in (self.source_combo, self.channel_combo, self.check_button,
+                        self.download_button, self.install_button):
+            control.setEnabled(True)
+        worker.deleteLater()
+
+    def _launch_install(self, package):
         record_action("update.install", from_version=CLIENT_VERSION, to_version=self._release.tag)
         script = Path(getattr(sys, "_MEIPASS", "")) / "updater" / "apply_update.ps1"
         if not script.is_file():
@@ -439,7 +526,7 @@ class SettingsPage(QWidget):
             subprocess.Popen([
                 "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 str(helper), "-InstallDir", str(Path(sys.executable).resolve().parent),
-                "-DeltaZip", str(self._target), "-FromVersion", CLIENT_VERSION,
+                "-DeltaZip", str(package), "-FromVersion", CLIENT_VERSION,
                 "-ToVersion", self._release.tag, "-TargetProcessId", str(os.getpid()),
             ], creationflags=subprocess.CREATE_NO_WINDOW)
         except OSError as exc:
@@ -460,6 +547,9 @@ class SettingsPage(QWidget):
 
     def stop(self):
         self._closing = True
+        if self._prepare_worker:
+            self._prepare_worker.requestInterruption()
+            self._prepare_worker.wait()
         if self._check_reply is not None:
             self._check_reply.abort()
         if self._manifest_reply is not None:

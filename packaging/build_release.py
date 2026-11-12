@@ -73,6 +73,8 @@ def build(components=None):
         distributions = ['websockets'] if component == 'server' else [
             'PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'python-mpv',
             'websockets', 'yt-dlp', 'segno', 'certifi', 'brotli', 'pycryptodomex', 'requests', 'urllib3', 'mutagen', 'Pillow']
+        if component == 'client' and CLIENT_VERSION.startswith('test'):
+            distributions += ['aiortc', 'av', 'aioice', 'pylibsrtp', 'cryptography']
         versions = {'Python': sys.version.split()[0], **{p: metadata.version(p) for p in distributions}}
         (package / '依赖版本.json').write_text(json.dumps(versions, ensure_ascii=False, indent=2), encoding='utf-8')
         notices = ('随包依赖信息及许可证见_internal中的各*.dist-info目录。\n'
@@ -83,6 +85,12 @@ def build(components=None):
                    'Pillow: https://python-pillow.org/ ; license: _internal/pillow-10.4.0.dist-info/LICENSE\n'
                    'Microsoft C/C++运行库随应用部署，无需单独安装。\n')
         (package / '第三方依赖说明.txt').write_text(notices, encoding='utf-8-sig')
+        if component == 'client':
+            inventory = package / '_internal/package-files.json'
+            paths = [path.relative_to(package).as_posix() for path in package.rglob('*') if path.is_file()]
+            paths.append('_internal/package-files.json')
+            inventory.write_text(json.dumps({'version': CLIENT_VERSION, 'files': sorted(set(paths))},
+                                            ensure_ascii=False), encoding='utf-8')
         print('Built: ' + str(package), flush=True)
 
 
