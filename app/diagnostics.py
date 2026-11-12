@@ -109,7 +109,13 @@ def setup_logging():
         _fatal_file = open(fatal_path, "a", encoding="utf-8")
         _fatal_file.write("\n=== session={} version={} ===\n".format(_session, CLIENT_VERSION))
         _fatal_file.flush()
-        faulthandler.enable(file=_fatal_file, all_threads=True)
+        # Windows mpv/LuaJIT uses handled native exceptions. Python's vectored
+        # faulthandler can intercept these and crash while walking other threads.
+        # Keep Python exception logging; native dumps are an explicit debug opt-in.
+        if sys.platform != 'win32' or os.environ.get('WATCHING_TOGETHER_NATIVE_FAULTS') == '1':
+            faulthandler.enable(file=_fatal_file, all_threads=True)
+        else:
+            logging.info('Native fault interception disabled for Windows mpv compatibility')
     except OSError as exc:
         logging.warning("Native fault log unavailable: %s", type(exc).__name__)
     logging.info("Client start version=%s frozen=%s os=%s architecture=%s python=%s cpu_count=%s",
