@@ -28,7 +28,11 @@ jobs:
           $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("hxxztch:$env:GITEE_TOKEN"))
           Write-Output "::add-mask::$basic"
           git remote add gitee https://gitee.com/hxxztch/watching-together.git
-          git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "HEAD:refs/heads/$env:GITHUB_REF_NAME"
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "HEAD:refs/heads/$env:GITHUB_REF_NAME"
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
     needs: sync_source
