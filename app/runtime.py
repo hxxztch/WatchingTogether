@@ -2,10 +2,30 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import sys
+import tempfile
 
 _dll_directories = {}
 _qt_tls_ready = False
+UPDATE_READY_ENV = 'WATCHING_TOGETHER_UPDATE_READY'
+
+
+def confirm_updated_startup(receipt):
+    """Signal that the new version has reached the Qt event loop."""
+    from app.version import CLIENT_VERSION
+
+    try:
+        path = Path(receipt).resolve()
+        if (path.name != 'client-ready.txt'
+                or path.parent.parent != Path(tempfile.gettempdir()).resolve()
+                or not re.fullmatch(r'wt-update-[a-f0-9]{32}', path.parent.name)):
+            return
+        with path.open('x', encoding='ascii') as stream:
+            stream.write('{} {}'.format(os.getpid(), CLIENT_VERSION))
+    except OSError:
+        # Confirmation is optional; the updater keeps the archive on failure.
+        return
 
 
 def start_update_helper(arguments, directory):

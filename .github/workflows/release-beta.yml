@@ -111,8 +111,8 @@ jobs:
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           foreach ($release in $releases) {
             $old = [string]$release.tag_name
-            # Several beta0.1.7 packages share the version but have different file hashes.
-            if ($old -eq 'beta0.1.7') { continue }
+            # These versions have multiple builds and cannot identify a single installed baseline.
+            if ($old -in @('beta0.1.7', 'test0.1.9')) { continue }
             if ($old -notmatch '^(beta|test)\d+\.\d+\.\d+$' -or $old -eq $env:RELEASE_VERSION) { continue }
             if ([version]($old -replace '^(beta|test)', '') -gt $current) { continue }
             if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
@@ -226,7 +226,7 @@ jobs:
             gh release download $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --dir $assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Could not fetch verified GitHub release assets' }
           }
-          $partSize = if ($env:RELEASE_VERSION -eq 'test0.1.9') { 8000000 } else { 30000000 }
+          $partSize = if ($env:RELEASE_VERSION.StartsWith('test')) { 8000000 } else { 30000000 }
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir $assets --part-size $partSize 2>&1 | Tee-Object -Variable lines
             $publishExit = $LASTEXITCODE
