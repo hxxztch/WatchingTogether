@@ -51,7 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-test0.1.9]') && 'test0.1.9' || contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
-          RETRY_MIRROR_VERSION: ${{ (contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') || contains(github.event.head_commit.message, '[retire-017-to-019-delta]')) && 'test0.1.9' || '' }}
+          RETRY_MIRROR_VERSION: ${{ contains(github.event.head_commit.message, '[add-test019-to-test0110-delta]') && 'test0.1.10' || (contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') || contains(github.event.head_commit.message, '[retire-017-to-019-delta]')) && 'test0.1.9' || '' }}
         run: python packaging/prepare_release.py
   release:
     needs: plan
@@ -111,8 +111,8 @@ jobs:
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           foreach ($release in $releases) {
             $old = [string]$release.tag_name
-            # These versions have multiple builds and cannot identify a single installed baseline.
-            if ($old -in @('beta0.1.7', 'test0.1.9')) { continue }
+            # The locally shared beta0.1.7 is incompatible with the GitHub baseline.
+            if ($old -eq 'beta0.1.7') { continue }
             if ($old -notmatch '^(beta|test)\d+\.\d+\.\d+$' -or $old -eq $env:RELEASE_VERSION) { continue }
             if ([version]($old -replace '^(beta|test)', '') -gt $current) { continue }
             if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
@@ -187,6 +187,33 @@ jobs:
             gh release delete-asset test0.1.9 $asset --repo $env:GITHUB_REPOSITORY --yes
             if ($LASTEXITCODE -ne 0) { throw "Could not withdraw $asset" }
           }
+      - name: Add a delta between published test0.1.9 and test0.1.10
+        if: env.RELEASE_VERSION == 'test0.1.10' && contains(github.event.head_commit.message, '[add-test019-to-test0110-delta]')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $source = 'test0.1.9'
+          $target = 'test0.1.10'
+          $dir = Join-Path $env:RUNNER_TEMP 'published-voice-packages'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          foreach ($tag in @($source, $target)) {
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "Could not read release $tag" }
+            $asset = $release.assets | Where-Object { $_.name -eq "$tag.zip" }
+            if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$') {
+              throw "Missing verified full package for $tag"
+            }
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern "$tag.zip" --dir $dir
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $tag" }
+            $hash = (Get-FileHash -LiteralPath (Join-Path $dir "$tag.zip") -Algorithm SHA256).Hash
+            if ("sha256:$hash" -ne $asset.digest) { throw "Published package hash mismatch for $tag" }
+          }
+          $delta = Join-Path $dir "$source-to-$target.delta.zip"
+          python packaging/make_delta.py --from-zip (Join-Path $dir "$source.zip") --to-zip (Join-Path $dir "$target.zip") --from-version $source --to-version $target --output $delta
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate delta' }
+          gh release upload $target --repo $env:GITHUB_REPOSITORY $delta ([IO.Path]::ChangeExtension($delta, '.json')) --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload the delta and its manifest' }
       - name: Publish static beta update feed
         shell: pwsh
         env:
