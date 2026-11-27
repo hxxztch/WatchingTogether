@@ -191,8 +191,9 @@ jobs:
             gh release download $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --dir $assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Could not fetch verified GitHub release assets' }
           }
+          $partSize = if ($env:RELEASE_VERSION -eq 'test0.1.9') { 8000000 } else { 30000000 }
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir $assets 2>&1 | Tee-Object -Variable lines
+            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir $assets --part-size $partSize 2>&1 | Tee-Object -Variable lines
             $publishExit = $LASTEXITCODE
             if ($publishExit -eq 0) { break }
             $reason = $lines | Where-Object { "$_" -like 'Gitee publication failed:*' } | Select-Object -Last 1

@@ -117,9 +117,12 @@ class Gitee:
         kwargs = {'params': values} if method == 'GET' else {'data': values}
         if file is not None:
             kwargs['files'] = {'file': (Path(file.name).name, file, 'application/octet-stream')}
-        response = self.session.request(method, API + suffix,
-            timeout=(20, 240), allow_redirects=False,
-            headers={'User-Agent': 'WatchingTogether-Gitee-Publisher'}, **kwargs)
+        try:
+            response = self.session.request(method, API + suffix,
+                timeout=(20, 240), allow_redirects=False,
+                headers={'User-Agent': 'WatchingTogether-Gitee-Publisher'}, **kwargs)
+        except requests.RequestException as exc:
+            raise RuntimeError('Gitee API {} {}: {}'.format(method, suffix, type(exc).__name__)) from None
         if missing and response.status_code == 404:
             return None
         if not 200 <= response.status_code < 300:
@@ -148,7 +151,7 @@ class Gitee:
         return {'url': url, 'digest': expected, 'size': size}
 
 
-def publish(tag, directory, token):
+def publish(tag, directory, token, part_size=PART_SIZE):
     if version_key(tag) is None or not tag.startswith(('beta', 'test')):
         raise ValueError('Invalid beta tag')
     directory = Path(directory)
@@ -177,7 +180,7 @@ def publish(tag, directory, token):
     split_dir = directory / 'gitee-parts'
     merge_commands = []
     for path in files:
-        parts = split_asset(path, split_dir)
+        parts = split_asset(path, split_dir, part_size)
         uploaded = [api.upload(rid, part, existing) for part in parts]
         asset = {'name': path.name, 'digest': digest(path), 'size': path.stat().st_size,
                  'browser_download_url': uploaded[0]['url']}
@@ -247,12 +250,15 @@ if __name__ == '__main__':
     parser.add_argument('--tag', required=True)
     parser.add_argument('--assets-dir', type=Path, required=True)
     parser.add_argument('--from-github', action='store_true')
+    parser.add_argument('--part-size', type=int, default=PART_SIZE)
     args = parser.parse_args()
+    if not 5_000_000 <= args.part_size <= PART_SIZE:
+        parser.error('--part-size must be between 5000000 and {}'.format(PART_SIZE))
     token = os.environ.get('GITEE_TOKEN') or getpass.getpass('Gitee token (hidden): ')
     try:
         if args.from_github:
             fetch_github(args.tag, args.assets_dir)
-        publish(args.tag, args.assets_dir, token)
+        publish(args.tag, args.assets_dir, token, args.part_size)
     except (RuntimeError, ValueError, TypeError, KeyError, OSError, requests.RequestException) as exc:
         print('Gitee publication failed: ' + (str(exc) if isinstance(exc, (RuntimeError, ValueError)) else type(exc).__name__), file=sys.stderr)
         sys.exit(1)
