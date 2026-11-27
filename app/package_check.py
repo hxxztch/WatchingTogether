@@ -33,6 +33,12 @@ def run(report_path, server_url=None):
         assert LoginSession._qr_png('https://www.bilibili.com/').startswith(b'\x89PNG')
         result['checks'].append('bundled certificate, yt-dlp extractors, crypto, brotli, QR encoder')
         app = QApplication.instance() or QApplication([])
+        from app.runtime import configure_qt_tls
+        from PySide6.QtNetwork import QSslSocket
+        assert configure_qt_tls(), 'Windows TLS backend unavailable'
+        if sys.platform == 'win32':
+            assert QSslSocket.activeBackend() == 'schannel'
+            result['checks'].append('bundled Windows Schannel TLS backend')
         errors = []
         sys.excepthook = lambda kind, value, tb: errors.append(kind.__name__)
         original_init = mpv.MPV.__init__

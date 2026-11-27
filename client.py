@@ -1,7 +1,7 @@
 ﻿"""XiangJian GuanYing - Client entry point."""
 import sys
 import os
-from app.runtime import configure_runtime, configure_taskbar_identity
+from app.runtime import configure_runtime, configure_taskbar_identity, configure_qt_tls
 
 configure_runtime()
 
@@ -27,6 +27,7 @@ def main():
         sys.exit(run(options.package_check, options.check_server))
     configure_taskbar_identity()
     app = QApplication(sys.argv)
+    configure_qt_tls()
     app.setApplicationName('WatchingTogether')
     app.setApplicationDisplayName('超时空会夜机')
     log_qt_environment(app)

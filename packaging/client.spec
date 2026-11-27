@@ -9,6 +9,10 @@ sys.path.insert(0, str(root))
 from app.version import CLIENT_NAME, CLIENT_VERSION
 
 qt = Path(PySide6.__file__).parent
+schannel = qt / 'plugins' / 'tls' / 'qschannelbackend.dll'
+if sys.platform == 'win32' and not schannel.is_file():
+    raise RuntimeError('The Windows Schannel TLS plugin is required')
+tls = [(str(schannel), 'PySide6/plugins/tls')] if sys.platform == 'win32' else []
 runtime_names = ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll',
                  'msvcp140_1.dll', 'msvcp140_2.dll', 'msvcp140_codecvt_ids.dll', 'concrt140.dll')
 runtime = [(str(qt / name), '.') for name in runtime_names if (qt / name).is_file()]
@@ -36,7 +40,7 @@ for package in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6',
     data += copy_metadata(package)
 
 a = Analysis([str(root / 'client.py')], pathex=[str(root)],
-    binaries=[(str(root / 'libmpv/libmpv-2.dll'), 'libmpv')] + runtime + openssl + yd_bin + p2p_bin,
+    binaries=[(str(root / 'libmpv/libmpv-2.dll'), 'libmpv')] + runtime + openssl + tls + yd_bin + p2p_bin,
     datas=data, hiddenimports=yd_hidden + p2p_hidden + ['websockets.asyncio.client', 'websockets.asyncio.server', 'segno', 'certifi', 'PIL.GifImagePlugin'],
     excludes=['tkinter', 'PyQt5', 'PyQt6', 'numpy', 'scipy', 'pandas', 'matplotlib', 'IPython'],
     noarchive=False, optimize=0)

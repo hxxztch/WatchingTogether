@@ -35,7 +35,6 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
-    needs: sync_source
     if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
     runs-on: windows-latest
     outputs:
@@ -134,6 +133,9 @@ jobs:
           while ($next -lt $lines.Count -and $lines[$next] -notmatch '^(beta|test)\d+\.\d+\.\d+（') { $next++ }
           $body = ($lines[1..($next - 1)] -join "`n").Trim()
           if (-not $body) { throw 'Release notes are empty' }
+          if ($env:RELEASE_VERSION -eq 'beta0.1.8') {
+            $body += "`n`n之前安装过单独分发的 beta0.1.7 闪退修订包的用户，请将完整包解压到新目录，再从旧目录复制 config.json 和 stickers。"
+          }
           Set-Content -LiteralPath release-notes.txt -Value $body -Encoding UTF8
       - name: Move explicitly republished version tag
         if: env.REPUBLISH_VERSION == env.RELEASE_VERSION
@@ -182,5 +184,9 @@ jobs:
             git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "refs/tags/$env:RELEASE_VERSION"
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror version tag' }
-          python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir "dist/gitee-$env:RELEASE_VERSION" --from-github
+          if (Test-Path -LiteralPath "dist/beta-archives/$env:RELEASE_VERSION.zip") {
+            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir dist/beta-archives
+          } else {
+            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir "dist/gitee-$env:RELEASE_VERSION" --from-github
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Gitee release publication failed' }
