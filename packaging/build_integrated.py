@@ -39,7 +39,7 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
     表情保存在EXE旁stickers文件夹，升级时保留；重新分发前请移除个人表情库。图片消息需要新版房主/服务器支持。
 13. 播放中最小化主窗口会弹出小窗，已有小窗不会随主窗口最小化；点小窗「返回影厅」恢复主窗口。
 14. 「设置」里的更新源默认选择 Gitee，可切换到 GitHub，选择自动保存。两种来源均支持差异包下载、校验和退出后安装，保留个人配置及表情库。
-    更新通道可选“稳定版”和“测试版（P2P）”，两个通道都保留切换入口。跨通道无对应差异包时使用完整包安装，保留个人配置、登录和表情库。
+    更新通道可选“稳定版”和“测试版”。跨通道无对应差异包时使用完整包安装，保留个人配置、登录和表情库。
     Gitee 超限附件会分段，软件内下载会自动合并；手动下载时请同时下载全部分段和发布页的 merge 合并脚本，合并并校验后再解压。
     本版更新器已修复等待旧进程退出的判断；从旧版升级时仍由旧更新器执行，若失败可下载完整包，退出旧客户端后解压到新目录并迁移config.json和stickers。
 
@@ -49,10 +49,9 @@ Windows 10 / 11 64 位；无需安装 Python、Qt、mpv 或独立服务端。
 组件 cloudflared 2026.10.1 随包提供，不安装系统服务、不需要账号，退出后清理进程。
 本预览版尚未在独立的 Windows 10 和 Windows 11 全新机器上分别验收。
 '''
-if release.CLIENT_VERSION.startswith('test'):
-    release.CLIENT_HELP += '''\n测试版 P2P：房间选择「同一局域网 · 直接连接」和「房主推流 · P2P」，分享完整邀请链接。
-房主打开本地视频即可向成员发送音视频，成员不必打开片源；暂停和跳转由房主控制。
-目前不支持网页片源推流或异地 STUN 穿透，异地联机请使用普通同步观影。
+release.CLIENT_HELP += '''\n内置房间支持语音：在聊天室选择「加入语音」，最多 6 人，按住「按住说话」才会开启麦克风。
+可分别选择麦克风、扬声器和语音音量。建议佩戴耳机，减少影片外放回声。
+公共通道语音经 Cloudflare 和房主转发。当前外部服务器连接可继续使用观影和文字聊天。
 '''
 
 
@@ -66,7 +65,9 @@ if __name__ == '__main__':
         package = release.DIST / release.CLIENT_NAME
         with (package / '第三方依赖说明.txt').open('a', encoding='utf-8') as notices:
             notices.write('\ncloudflared 2026.10.1 (Apache-2.0): https://github.com/cloudflare/cloudflared\n'
-                          'License: _internal/THIRD-PARTY-CLOUDFLARED.txt\n')
+                          'License: _internal/THIRD-PARTY-CLOUDFLARED.txt\n'
+                          'Opus 1.6.1: https://opus-codec.org/\n'
+                          'License: _internal/tools/opus/COPYING\n')
     else:
         release.archive(args.output, names=[release.CLIENT_NAME],
                         filenames={release.CLIENT_NAME: release.CLIENT_VERSION + '.zip'},

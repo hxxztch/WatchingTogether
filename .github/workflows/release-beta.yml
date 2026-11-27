@@ -2,7 +2,7 @@ name: Publish beta client
 
 on:
   push:
-    branches: ['beta', 'codex/p2p-lan-prototype']
+    branches: ['beta', 'test/room-voice']
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync_source:
-    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
+    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/test/room-voice'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
     needs: sync_source
-    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/codex/p2p-lan-prototype'
+    if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/test/room-voice'
     runs-on: windows-latest
     outputs:
       version: ${{ steps.plan.outputs.version }}
@@ -69,7 +69,7 @@ jobs:
           fetch-depth: 0
       - uses: conda-incubator/setup-miniconda@v4
         with:
-          python-version: ${{ startsWith(needs.plan.outputs.version, 'test') && '3.11.9' || '3.8.20' }}
+          python-version: '3.8.20'
           activate-environment: build
           auto-activate: true
           channels: conda-forge
@@ -79,7 +79,6 @@ jobs:
         run: |
           python -m pip install pip==25.0.1
           python -m pip install -r packaging/requirements-lock.txt
-          if ($env:RELEASE_VERSION.StartsWith('test')) { python -m pip install -r requirements-p2p.txt }
           python -m pip check
       - name: Run unit tests
         if: needs.plan.outputs.build == 'true'
@@ -92,6 +91,9 @@ jobs:
         shell: pwsh
         run: |
           ./packaging/fetch_cloudflared.ps1
+          ./packaging/fetch_opus.ps1
+          python tests/voice_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Room voice check failed' }
           New-Item -ItemType Directory -Force -Path "build/$env:RELEASE_VERSION" | Out-Null
           python packaging/build_integrated.py build 2>&1 | Tee-Object -FilePath "build/$env:RELEASE_VERSION/build-console.log"
           if ($LASTEXITCODE -ne 0) { throw 'Portable client build failed' }

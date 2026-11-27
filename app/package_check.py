@@ -33,6 +33,22 @@ def run(report_path, server_url=None):
         assert LoginSession._qr_png('https://www.bilibili.com/').startswith(b'\x89PNG')
         result['checks'].append('bundled certificate, yt-dlp extractors, crypto, brotli, QR encoder')
         app = QApplication.instance() or QApplication([])
+        from app.voice_codec import Opus, SAMPLES
+        from PySide6.QtMultimedia import QAudioSource, QAudioSink
+        from PySide6.QtWebSockets import QWebSocket
+        codec = Opus()
+        try:
+            codec.start_capture()
+            assert len(codec.decode(0, codec.encode(bytes(SAMPLES * 2)))) == SAMPLES * 2
+        finally:
+            codec.close()
+        result['checks'].append('bundled Opus codec, Qt audio and voice socket')
+        from app.runtime import configure_qt_tls
+        from PySide6.QtNetwork import QSslSocket
+        assert configure_qt_tls(), 'Windows TLS backend unavailable'
+        if sys.platform == 'win32':
+            assert QSslSocket.activeBackend() == 'schannel'
+            result['checks'].append('bundled Windows Schannel TLS backend')
         errors = []
         sys.excepthook = lambda kind, value, tb: errors.append(kind.__name__)
         original_init = mpv.MPV.__init__

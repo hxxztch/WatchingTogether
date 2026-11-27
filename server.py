@@ -140,6 +140,10 @@ class Server:
         self.owner_token = None
         self.grace_period = grace_period
         self._maintenance = None
+        self.voice = None
+        if hosted:
+            from app.voice_relay import VoiceRelay
+            self.voice = VoiceRelay()
 
     async def __aenter__(self):
         self._maintenance = asyncio.create_task(self._maintain())
@@ -162,6 +166,9 @@ class Server:
                 self.rooms.pop(code, None)
 
     def disband(self, room):
+        if self.voice:
+            for member in room.members.values():
+                self.voice.revoke(member)
         self.broadcast(room, {"type": "room_closed", "message": "房主已离开，房间已解散"})
         self.rooms.pop(room.code, None)
         room.members.clear()
@@ -187,6 +194,8 @@ class Server:
         # An old connection's finally must not remove its resumed replacement.
         if room is None or member is None or member.peer is not peer:
             return
+        if self.voice:
+            self.voice.revoke(member)
         if intentional and self.hosted and member.token == self.owner_token:
             self.disband(room)
             member.peer = None
@@ -277,13 +286,14 @@ class Server:
                             if self.hosted and mtype == "create_room":
                                 self.owner_token = member.token
                             cursor = room.chat_seq
+                        voice = {"voice_ticket": self.voice.issue(member)} if self.voice else {}
                         peer.send({"type": "room_created" if mtype == "create_room" else "room_joined",
                                    "room": room.code, "name": member.name,
                                    "token": member.token, "protocol": 2,
                                    "chat_seq": cursor, "chat_images": True, "chat_gifs": True,
                                    "chat_media_bytes": MAX_MESSAGE_BYTES,
                                    "resumed": mtype == "resume_room", "members": room.member_names,
-                                   "state": room.snapshot()})
+                                   "state": room.snapshot(), **voice})
                         if mtype == "resume_room":
                             if room.history and cursor < room.history[0][1]["seq"] - 1:
                                 peer.send({"type": "delivery_failed",

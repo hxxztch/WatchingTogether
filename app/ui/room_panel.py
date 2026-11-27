@@ -174,6 +174,9 @@ class RoomPanel(QWidget):
         ir_layout = QVBoxLayout(in_room)
         ir_layout.setContentsMargins(0, 0, 0, 0)
         ir_layout.setSpacing(8)
+        from app.ui.voice import RoomVoice
+        self.voice = RoomVoice(in_room)
+        ir_layout.addWidget(self.voice)
         self._member_list = QListWidget(self)
         self._member_list.hide()  # Shared membership model for Rooms and the details dialog.
         self._chat_list = QListWidget()
@@ -352,6 +355,7 @@ class RoomPanel(QWidget):
         self.set_busy(in_room)
         self.room_code_label.setText(f'房间号：{room_code}' if in_room else '尚未加入房间')
         if not in_room:
+            self.voice.set_room()
             self._latency = None
             self.set_invitation('')
         if in_room:

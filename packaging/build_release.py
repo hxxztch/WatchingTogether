@@ -73,9 +73,9 @@ def build(components=None):
         distributions = ['websockets'] if component == 'server' else [
             'PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'python-mpv',
             'websockets', 'yt-dlp', 'segno', 'certifi', 'brotli', 'pycryptodomex', 'requests', 'urllib3', 'mutagen', 'Pillow']
-        if component == 'client' and CLIENT_VERSION.startswith('test'):
-            distributions += ['aiortc', 'av', 'aioice', 'pylibsrtp', 'cryptography']
         versions = {'Python': sys.version.split()[0], **{p: metadata.version(p) for p in distributions}}
+        if component == 'client':
+            versions['Opus'] = '1.6.1'
         (package / '依赖版本.json').write_text(json.dumps(versions, ensure_ascii=False, indent=2), encoding='utf-8')
         notices = ('随包依赖信息及许可证见_internal中的各*.dist-info目录。\n'
                    'Qt / PySide6: https://www.qt.io/qt-for-python\n'

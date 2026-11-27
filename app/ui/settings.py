@@ -20,6 +20,7 @@ from app.updates import (SOURCES, DEFAULT_SOURCE, CHANNELS, channel_for_version,
 from app.config import load, save
 from app.version import CLIENT_VERSION
 from app.diagnostics import record_action, recent_actions
+from app.runtime import configure_qt_tls
 from app.ui.shell import card, label
 
 
@@ -45,6 +46,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._tls_ready = configure_qt_tls()
         QNetworkProxyFactory.setUseSystemConfiguration(True)
         self._network = QNetworkAccessManager(self)
         self._check_reply = None
@@ -87,7 +89,7 @@ class SettingsPage(QWidget):
         channel_row.addWidget(self.channel_combo)
         channel_row.addStretch()
         version_layout.addLayout(channel_row)
-        version_layout.addWidget(label('稳定版沿用现有功能；测试版包含局域网 P2P 房主推流。可随时切回另一通道，保留配置和收藏表情。', 'subtle', True))
+        version_layout.addWidget(label('测试版支持房间语音。切换版本通道时会保留配置和收藏表情。', 'subtle', True))
         source_row = QHBoxLayout()
         source_row.addWidget(label('更新源'))
         self.source_combo = QComboBox()
@@ -203,6 +205,9 @@ class SettingsPage(QWidget):
 
     def check_updates(self, automatic=False):
         if self._closing or self._check_reply is not None or self._downloading or self._prepare_worker:
+            return
+        if not self._tls_ready:
+            self.status.setText('Windows 安全连接组件不可用，请重新解压完整客户端，或从发布页手动下载。')
             return
         self.check_button.setEnabled(False)
         self._automatic = automatic is True

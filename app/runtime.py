@@ -5,6 +5,27 @@ from pathlib import Path
 import sys
 
 _dll_directories = {}
+_qt_tls_ready = False
+
+
+def configure_qt_tls():
+    """Select Windows TLS before Qt creates any encrypted connections.
+
+    Qt otherwise prefers the bundled OpenSSL library. Python networking still
+    needs that library, so keep it bundled and select Schannel only for Qt.
+    Never fall back to the crashing backend if the native plugin is missing.
+    """
+    global _qt_tls_ready
+    if sys.platform != 'win32' or _qt_tls_ready:
+        return True
+    import logging
+    from PySide6.QtNetwork import QSslSocket
+    if not QSslSocket.setActiveBackend('schannel'):
+        logging.error('Qt TLS: Windows Schannel unavailable; update requests disabled')
+        return False
+    _qt_tls_ready = True
+    logging.info('Qt TLS backend=schannel')
+    return True
 
 
 def configure_taskbar_identity():

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtCore import QCoreApplication
 from websockets.asyncio.client import connect
-from websockets.exceptions import InvalidStatus
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 from app.hosting import EmbeddedHost, make_invitation, parse_invitation
 from app.network import NetworkClient
 from app.chat_media import MAX_MESSAGE_BYTES
@@ -32,6 +32,33 @@ async def send(ws, kind, **kw):
 
 
 class HostingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_voice_is_authenticated_and_stops_on_leave(self):
+        owner = await self.socket(self.host.host_path)
+        await send(owner, 'create_room', name='owner')
+        room = await receive(owner, 'room_created')
+        guest = await self.socket(self.host.guest_path)
+        await send(guest, 'join_room', name='guest', room=room['room'])
+        joined = await receive(guest, 'room_joined')
+
+        async with connect(self.base + self.host.guest_path + '/voice') as denied:
+            await denied.send(joined['token'])
+            with self.assertRaises(ConnectionClosed) as rejected:
+                await asyncio.wait_for(denied.recv(), 3)
+            self.assertEqual(rejected.exception.rcvd.code, 1008)
+        async with connect(self.base + self.host.host_path + '/voice') as sender, \
+                connect(self.base + self.host.guest_path + '/voice') as listener:
+            await sender.send(room['voice_ticket'])
+            await listener.send(joined['voice_ticket'])
+            self.assertEqual(await asyncio.wait_for(sender.recv(), 3), 'ready')
+            self.assertEqual(await asyncio.wait_for(listener.recv(), 3), 'ready')
+            await sender.send(b'voice-frame')
+            self.assertEqual((await asyncio.wait_for(listener.recv(), 3))[1:], b'voice-frame')
+            await send(guest, 'leave_room')
+            await receive(guest, 'left_room')
+            await asyncio.wait_for(listener.wait_closed(), 3)
+            await send(owner, 'leave_room')
+            await asyncio.wait_for(sender.wait_closed(), 3)
+
     async def test_large_gif_new_client_old_client_and_reconnect(self):
         import base64
         import random

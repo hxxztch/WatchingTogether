@@ -63,8 +63,7 @@ class RoomShareController(QObject):
             if legacy:
                 link = make_legacy_invitation(owner._network.url, owner._room_code)
             invite = parse_share(link)
-            p2p = getattr(owner, '_p2p', None)
-            watching = '房主推流 · P2P' if p2p and p2p.active else '同步观影'
+            watching = '同步观影'
             connection = '局域网' if owner._room_panel.mode.currentIndex() == 1 else '公共通道'
             if legacy:
                 connection = '原服务器 / 外部内网穿透（需可访问分享者的服务器地址）'

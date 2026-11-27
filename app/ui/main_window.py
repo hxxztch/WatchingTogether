@@ -284,6 +284,7 @@ class MainWindow(QMainWindow):
             return
         if self._network._stopping.is_set():
             return
+        self._room_panel.voice.set_room()
         self._room_ready = False
         self._player.set_speed(1.0)
         self._room_panel.set_latency(None)
@@ -341,6 +342,7 @@ class MainWindow(QMainWindow):
                 self._playback_sync = PlaybackSynchronizer()
                 self._my_name = msg.get("name", self._my_name)
                 self._room_panel.set_in_room(True, self._room_code, msg.get("members", []))
+                self._room_panel.voice.set_room(self._network.url, msg.get('voice_ticket', ''))
                 self._room_panel.set_status(
                     ("已恢复房间 " if msg.get("resumed") else "已加入房间 ") + self._room_code,
                     "#4CAF50")
@@ -425,6 +427,7 @@ class MainWindow(QMainWindow):
 
     def _on_leave_room(self):
         record_action("room.leave")
+        self._room_panel.voice.set_room()
         if self._rooms.host is not None or self._rooms.integrated:
             self._rooms.cancel()
             return

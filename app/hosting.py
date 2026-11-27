@@ -61,15 +61,24 @@ class EmbeddedHost(QThread):
             async def authenticate(connection, request):
                 # Browser cross-origin access is unnecessary; accept only our app.
                 remote = connection.remote_address
-                owner = (request.path == self.host_path and remote and
+                path = request.path[:-6] if request.path.endswith('/voice') else request.path
+                owner = (path == self.host_path and remote and
                          remote[0] in ('127.0.0.1', '::1'))
-                if request.headers.get('Origin') or not (owner or request.path == self.guest_path):
+                if request.headers.get('Origin') or not (owner or path == self.guest_path):
                     return connection.respond(HTTPStatus.FORBIDDEN, 'Forbidden\n')
                 # Never accept owner credentials through a public reverse proxy.
                 if owner and ('CF-Connecting-IP' in request.headers or 'X-Forwarded-For' in request.headers):
                     return connection.respond(HTTPStatus.FORBIDDEN, 'Forbidden\n')
 
             async def handle(ws):
+                if ws.request.path.endswith('/voice'):
+                    ws.protocol.max_size = 1024
+                    room = next(iter(server.rooms.values()), None)
+                    if room is None:
+                        await ws.close(1008)
+                    else:
+                        await server.voice.handle(ws, room)
+                    return
                 await server.handle(ws, is_host=ws.request.path == self.host_path)
 
             async with serve(handle, '0.0.0.0' if self.lan else '127.0.0.1', 0,
