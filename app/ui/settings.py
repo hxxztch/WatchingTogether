@@ -4,12 +4,13 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
 from zipfile import BadZipFile
 
-from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal, QThread
+from PySide6.QtCore import QObject, QStandardPaths, QTimer, QUrl, Signal, QThread
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkProxyFactory,
                                QNetworkReply, QNetworkRequest)
@@ -68,6 +69,8 @@ class SettingsPage(QWidget):
         self._check_source = ""
         self._manifest_reply = None
         self._download_reply = None
+        self._download_retry = QTimer(self, singleShot=True)
+        self._download_retry.timeout.connect(self._retry_download_part)
         self._output = None
         self._partial = None
         self._target = None
@@ -381,28 +384,67 @@ class SettingsPage(QWidget):
 
     def _start_part(self):
         self._part_start = self._output.tell()
+        self._hash_before_part = self._hash.copy()
+        self._download_attempt = 0
+        self._reset_part_bytes()
+        self._retry_download_part()
+
+    def _reset_part_bytes(self):
+        self._output.seek(self._part_start)
+        self._output.truncate()
+        self._hash = self._hash_before_part.copy()
         self._part_hash = hashlib.sha256()
         self._part_bytes = 0
-        self._hash_before_part = self._hash.copy()
+
+    def _retry_download_part(self):
+        if self._closing or not self._downloading:
+            return
         self._download_redirects = 0
-        self._start_download_request(self._parts[self._part_index].url)
+        part = self._parts[self._part_index]
+        try:
+            if not part.size or self._part_bytes >= part.size:
+                self._reset_part_bytes()
+            self._start_download_request(part.url)
+        except OSError as exc:
+            self.status.setText('下载失败：' + str(exc))
+            self._cleanup_download()
 
     def _start_download_request(self, url):
-        reply = self._network.get(self._request(url, 120000))
+        request = self._request(url, 120000)
+        request.setRawHeader(b'Accept', b'application/octet-stream')
+        request.setRawHeader(b'Accept-Encoding', b'identity')
+        self._request_offset = self._part_bytes
+        self._response_validated = False
+        self._download_error = ''
+        if self._request_offset:
+            request.setRawHeader(b'Range', ('bytes={}-'.format(self._request_offset)).encode('ascii'))
+        reply = self._network.get(request)
         self._download_reply = reply
         reply.readyRead.connect(lambda: self._read_download(reply))
-        reply.downloadProgress.connect(self._download_progress)
+        reply.downloadProgress.connect(lambda received, total: self._download_progress(reply, received, total))
         reply.finished.connect(lambda: self._finish_download(reply))
 
     def _read_download(self, reply):
         if reply is not self._download_reply or self._output is None:
             return
-        if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) in (301, 302, 303, 307, 308):
+        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        if status not in (200, 206) or self._download_error:
             reply.readAll()
             return
         try:
-            data = bytes(reply.readAll())
             expected_size = self._parts[self._part_index].size
+            if not self._response_validated:
+                if status == 206:
+                    header = bytes(reply.rawHeader(b'Content-Range'))
+                    expected_range = 'bytes {}-{}/{}'.format(self._request_offset, expected_size - 1, expected_size)
+                    if not self._request_offset or not expected_size or header != expected_range.encode('ascii'):
+                        raise ValueError('更新源返回了不匹配的续传范围')
+                elif self._request_offset:
+                    # A server may ignore Range. Start this part over safely.
+                    self._reset_part_bytes()
+                    self._request_offset = 0
+                self._response_validated = True
+            data = bytes(reply.readAll())
             if ((expected_size and self._part_bytes + len(data) > expected_size) or
                     self._output.tell() + len(data) > 2 * 1024 ** 3):
                 raise OSError('下载文件超过清单大小')
@@ -410,16 +452,20 @@ class SettingsPage(QWidget):
             self._hash.update(data)
             self._part_hash.update(data)
             self._part_bytes += len(data)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            self._download_error = str(exc)
             logging.warning("Update download write failed: %s", exc)
-            reply.abort()
+            if reply.isRunning():
+                reply.abort()
 
-    def _download_progress(self, received, total):
+    def _download_progress(self, reply, received, total):
+        if reply is not self._download_reply or not self._response_validated or self._download_error:
+            return
         planned = sum(part.size for part in self._parts)
         completed = sum(part.size for part in self._parts[:self._part_index])
         if planned > 0:
             self.status.setText('正在下载：{}%（{}/{}）'.format(
-                min(100, int((completed + received) * 100 / planned)),
+                min(100, int((completed + self._part_bytes) * 100 / planned)),
                 self._part_index + 1, len(self._parts)))
         elif total > 0:
             self.status.setText('正在下载：{}%'.format(int(received * 100 / total)))
@@ -434,11 +480,6 @@ class SettingsPage(QWidget):
             try:
                 target = self._redirect_target(reply, self._download_redirects)
                 if target is not None:
-                    self._output.seek(self._part_start)
-                    self._output.truncate(self._part_start)
-                    self._hash = self._hash_before_part.copy()
-                    self._part_hash = hashlib.sha256()
-                    self._part_bytes = 0
                     self._download_redirects += 1
                     self._start_download_request(target)
                     reply.deleteLater()
@@ -452,10 +493,27 @@ class SettingsPage(QWidget):
                 return
             if redirect_error is not None:
                 raise redirect_error
+            if self._download_error:
+                raise OSError(self._download_error)
+            error = reply.error()
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            transient = error in (QNetworkReply.OperationCanceledError, QNetworkReply.TimeoutError,
+                                  QNetworkReply.RemoteHostClosedError, QNetworkReply.TemporaryNetworkFailureError,
+                                  QNetworkReply.ConnectionRefusedError, QNetworkReply.HostNotFoundError,
+                                  QNetworkReply.ProxyTimeoutError, QNetworkReply.ProxyConnectionClosedError)
+            if transient or status in (502, 503, 504):
+                logging.warning('Update transfer interrupted error=%s http=%s part=%d bytes=%d retry=%d',
+                                getattr(error, 'name', '?'), status, self._part_index + 1,
+                                self._part_bytes, self._download_attempt)
+                if self._download_attempt < 2:
+                    self._download_attempt += 1
+                    self.status.setText('下载连接中断，正在重试（{}/2）…'.format(self._download_attempt))
+                    self._download_retry.start(1000 * self._download_attempt)
+                    return
+                raise OSError('下载超时或连接中断，请重试或从发布页手动下载完整包')
             if reply.error() != QNetworkReply.NoError:
                 raise OSError(reply.errorString())
-            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-            if status != 200:
+            if status not in (200, 206) or not self._response_validated:
                 raise OSError('更新源下载失败（HTTP {}）'.format(status))
             part = self._parts[self._part_index]
             if (part.size and self._part_bytes != part.size) or (
@@ -486,6 +544,7 @@ class SettingsPage(QWidget):
             reply.deleteLater()
 
     def _cleanup_download(self):
+        self._download_retry.stop()
         if self._output is not None:
             self._output.close()
             self._output = None
@@ -576,6 +635,7 @@ class SettingsPage(QWidget):
                 str(helper), "-InstallDir", str(Path(sys.executable).resolve().parent),
                 "-DeltaZip", str(package), "-FromVersion", CLIENT_VERSION,
                 "-ToVersion", self._release.tag, "-TargetProcessId", str(os.getpid()),
+                "-DownloadedZip", str(self._target), "-DownloadedDigest", self._expected_digest,
             ], helper_dir)
         except OSError as exc:
             logging.warning("Could not start updater: %s", exc)
@@ -604,3 +664,5 @@ class SettingsPage(QWidget):
             self._manifest_reply.abort()
         if self._download_reply is not None:
             self._download_reply.abort()
+        elif self._downloading:
+            self._cleanup_download()

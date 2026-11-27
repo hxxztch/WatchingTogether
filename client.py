@@ -1,7 +1,8 @@
 ﻿"""XiangJian GuanYing - Client entry point."""
 import sys
 import os
-from app.runtime import configure_runtime, configure_taskbar_identity, configure_qt_tls
+from app.runtime import (UPDATE_READY_ENV, confirm_updated_startup, configure_runtime,
+                         configure_taskbar_identity, configure_qt_tls)
 
 configure_runtime()
 
@@ -17,6 +18,7 @@ from app.ui.main_window import MainWindow
 
 
 def main():
+    update_receipt = os.environ.pop(UPDATE_READY_ENV, '')
     if "--package-check" in sys.argv:
         import argparse
         from app.package_check import run
@@ -38,6 +40,8 @@ def main():
     app.setWindowIcon(window.windowIcon())
     window.show()
     QTimer.singleShot(500, lambda: window._shell.settings.check_updates(True))
+    if update_receipt:
+        QTimer.singleShot(2500, lambda: confirm_updated_startup(update_receipt))
     sys.exit(app.exec())
 
 

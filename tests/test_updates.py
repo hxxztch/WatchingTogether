@@ -1,5 +1,6 @@
 """Release selection and file-level update checks."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -111,6 +112,75 @@ class UpdateTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows updater process waiting')
     def test_wait_timeout_keeps_client_and_configuration_untouched(self):
         self._check_process_wait('timeout')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows updater startup confirmation')
+    def test_download_cleanup_requires_matching_digest_and_startup(self):
+        with tempfile.TemporaryDirectory(prefix='wt-updater-cleanup-') as temporary:
+            root = Path(temporary)
+            stub = root / 'client.exe'
+            compile_stub = root / 'compile.ps1'
+            compile_stub.write_text("""param([string]$Output)
+$ErrorActionPreference = 'Stop'
+Add-Type -OutputAssembly $Output -OutputType WindowsApplication -TypeDefinition @'
+using System;
+using System.IO;
+using System.Diagnostics;
+using System.Threading;
+public static class UpdatedClient {
+    public static void Main() {
+        if (Environment.GetEnvironmentVariable("WT_TEST_REPLY") == "yes") {
+            File.WriteAllText(Environment.GetEnvironmentVariable("WATCHING_TOGETHER_UPDATE_READY"),
+                Process.GetCurrentProcess().Id + " beta0.1.4");
+            Thread.Sleep(1800);
+        }
+    }
+}
+'@
+""", encoding='utf-8')
+            ps = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File']
+            args = {'capture_output': True, 'timeout': 25, 'creationflags': subprocess.CREATE_NO_WINDOW}
+            built = subprocess.run(ps + [str(compile_stub), str(stub)], **args)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            old_zip, new_zip = root / 'old.zip', root / 'new.zip'
+            for path, data in ((old_zip, b'old'), (new_zip, b'new')):
+                with zipfile.ZipFile(path, 'w') as archive:
+                    archive.writestr('client/change.txt', data)
+                    if path == new_zip:
+                        archive.write(stub, 'client/超时空会夜机beta0.1.4.exe')
+            managed = root / 'WatchingTogether'
+            managed.mkdir()
+            original = managed / 'beta0.1.4.zip'
+            unrelated = managed / 'beta0.1.2.zip'
+            unrelated.write_bytes(b'keep')
+            delta = managed / 'beta0.1.3-to-beta0.1.4.delta.zip'
+            original.write_bytes(new_zip.read_bytes())
+            make_delta.create_delta(old_zip, new_zip, 'beta0.1.3', 'beta0.1.4', delta)
+            delta_bytes = delta.read_bytes()
+            staging = root / 'portable.delta.zip'
+            staging.write_bytes(delta_bytes)
+            for index, (download, reply, correct, remove) in enumerate((
+                    (original, 'no', True, False),
+                    (original, 'yes', False, False),
+                    (original, 'yes', True, True),
+                    (delta, 'yes', True, True),
+            )):
+                with self.subTest(reply=reply, correct=correct, download=download.name):
+                    install = root / ('install' + str(index))
+                    install.mkdir()
+                    (install / 'change.txt').write_bytes(b'old')
+                    digest = hashlib.sha256(download.read_bytes()).hexdigest() if correct else '0' * 64
+                    result = subprocess.run(ps + [str(ROOT / 'packaging/apply_update.ps1'),
+                        '-InstallDir', str(install), '-DeltaZip', str(delta if download == delta else staging),
+                        '-FromVersion', 'beta0.1.3', '-ToVersion', 'beta0.1.4',
+                        '-DownloadedZip', str(download), '-DownloadedDigest', 'sha256:' + digest],
+                        env=dict(os.environ, WT_TEST_REPLY=reply), **args)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual((install / 'change.txt').read_bytes(), b'new')
+                    self.assertEqual(download.exists(), not remove)
+                    self.assertEqual(unrelated.read_bytes(), b'keep')
+                    if reply == 'yes':
+                        # Let the short confirmation fixture release its EXE on Windows.
+                        time.sleep(2)
 
     @unittest.skipUnless(os.name == 'nt', 'Windows repair updater')
     def test_repair_helper_rejects_unverified_zip_before_changing_files(self):

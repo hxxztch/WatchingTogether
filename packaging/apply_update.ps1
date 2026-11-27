@@ -5,6 +5,8 @@
     [Parameter(Mandatory=$true)][string]$ToVersion,
     [int]$TargetProcessId = 0,
     [ValidateRange(1, 90)][int]$ExitWaitSeconds = 90,
+    [string]$DownloadedZip = '',
+    [string]$DownloadedDigest = '',
     [switch]$NoRestart
 )
 $ErrorActionPreference = 'Stop'
@@ -50,6 +52,29 @@ function Check-Hash([string]$path, [string]$expected) {
         $stream.Dispose()
     }
     if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA256 mismatch: $path" }
+}
+
+function Remove-VerifiedDownload {
+    try {
+        $path = [IO.Path]::GetFullPath($DownloadedZip)
+        $name = [IO.Path]::GetFileName($path)
+        if ($name -notin @("${ToVersion}.zip", "${FromVersion}-to-${ToVersion}.delta.zip") -or
+            [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($path)) -ine 'WatchingTogether' -or
+            $DownloadedDigest -notmatch '^sha256:[a-fA-F0-9]{64}$') {
+            Write-UpdateLog 'download retained: not a managed update archive'
+            return
+        }
+        $item = Get-Item -LiteralPath $path
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Write-UpdateLog 'download retained: not a regular file'
+            return
+        }
+        Check-Hash $path $DownloadedDigest.Substring(7)
+        Remove-Item -LiteralPath $path
+        Write-UpdateLog "download removed after confirmed startup: $name"
+    } catch {
+        Write-UpdateLog "download cleanup skipped: $($_.Exception.GetType().Name)"
+    }
 }
 
 function Wait-ClientExit([int]$processId, [int]$seconds) {
@@ -157,7 +182,41 @@ try {
         $phase = 'restarting'
         $newExe = Safe-Target ('超时空会夜机' + $ToVersion + '.exe')
         if (-not (Test-Path -LiteralPath $newExe -PathType Leaf)) { throw 'Updated EXE missing' }
-        Start-Process -FilePath $newExe -WorkingDirectory $installRoot
+        if ($null -ne $archive) {
+            $archive.Dispose()
+            $archive = $null
+        }
+        if (-not $DownloadedZip) {
+            Start-Process -FilePath $newExe -WorkingDirectory $installRoot
+        } else {
+            $receipt = Join-Path $tempRoot 'client-ready.txt'
+            $previousReceipt = $env:WATCHING_TOGETHER_UPDATE_READY
+            try {
+                $env:WATCHING_TOGETHER_UPDATE_READY = $receipt
+                $newClient = Start-Process -FilePath $newExe -WorkingDirectory $installRoot -PassThru
+            } finally {
+                $env:WATCHING_TOGETHER_UPDATE_READY = $previousReceipt
+            }
+            try {
+                $confirmed = $false
+                $startup = [Diagnostics.Stopwatch]::StartNew()
+                while (-not $newClient.HasExited -and $startup.ElapsedMilliseconds -lt 20000) {
+                    if ((Test-Path -LiteralPath $receipt -PathType Leaf) -and
+                        (Get-Content -LiteralPath $receipt -Raw -ErrorAction SilentlyContinue) -ceq "$($newClient.Id) $ToVersion") {
+                        $confirmed = $true
+                        break
+                    }
+                    Start-Sleep -Milliseconds 200
+                }
+                if ($confirmed -and -not $newClient.HasExited) {
+                    Remove-VerifiedDownload
+                } else {
+                    Write-UpdateLog 'download retained: updated client did not confirm startup'
+                }
+            } finally {
+                $newClient.Dispose()
+            }
+        }
     }
 } catch {
     $detail = $_.Exception

@@ -61,8 +61,9 @@ def main():
     test_release = {'tag_name': test_version,
         'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + test_version,
         'assets': [dict(full, name=test_version + '.zip')]}
-    state = {'bad': False, 'fail_feed': False}
+    state = {'bad': False, 'fail_feed': False, 'interrupt': None}
     calls = []
+    ranges = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -79,6 +80,27 @@ def main():
                 content = chunks[0]
             elif path.endswith('full.002'):
                 content = b'x' * len(chunks[1]) if state['bad'] else chunks[1]
+                requested = self.headers.get('Range')
+                if requested:
+                    ranges.append(requested)
+                    if state['interrupt'] != 'restart':
+                        offset = int(requested[6:-1])
+                        self.send_response(206)
+                        start = offset - 1 if state['interrupt'] == 'bad_range' else offset
+                        self.send_header('Content-Range', 'bytes {}-{}/{}'.format(start, len(content) - 1, len(content)))
+                        self.send_header('Content-Length', str(len(content) - offset))
+                        self.end_headers()
+                        self.wfile.write(content[offset:])
+                        return
+                elif state['interrupt'] and not ranges:
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content[:5])
+                    self.wfile.flush()
+                    time.sleep(.8)
+                    self.close_connection = True
+                    return
             elif path.endswith('change.delta.zip'):
                 content = delta
             else:
@@ -97,8 +119,11 @@ def main():
 
     def local_request(self, url, timeout):
         parsed = urlsplit(str(url))
-        return QNetworkRequest(QUrl('http://127.0.0.1:{}{}{}'.format(
+        request = QNetworkRequest(QUrl('http://127.0.0.1:{}{}{}'.format(
             server.server_port, parsed.path, '?' + parsed.query if parsed.query else '')))
+        if timeout >= 120000 and state['interrupt']:
+            request.setTransferTimeout(300)
+        return request
 
     def wait(check):
         end = time.monotonic() + 10
@@ -133,6 +158,18 @@ def main():
             wait(lambda: not page._downloading)
             assert page._target.read_bytes() == data and page.source_combo.isEnabled()
             assert not page.install_button.isVisible()  # Source runs never install over the workspace.
+            for mode in ('resume', 'restart', 'bad_range'):
+                start = len(calls)
+                ranges.clear()
+                state['interrupt'] = mode
+                page.download_update()
+                wait(lambda: not page._downloading)
+                assert ranges == ['bytes=5-'], (mode, ranges)
+                assert sum(call.endswith('full.001') for call in calls[start:]) == 1
+                assert page._target.read_bytes() == data and not page._partial.exists()
+                assert ('续传范围' in page.status.text() if mode == 'bad_range'
+                        else page.status.text().startswith('下载完成')), (mode, page.status.text())
+            state['interrupt'] = None
             state['bad'] = True
             page.download_update()
             wait(lambda: not page._downloading)
