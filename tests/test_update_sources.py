@@ -29,8 +29,8 @@ def gitee_release(tag='beta0.1.4'):
 
 
 class UpdateSourceTests(unittest.TestCase):
-    def test_gitee_default_and_same_channel_version_selection(self):
-        self.assertEqual(DEFAULT_SOURCE, 'gitee')
+    def test_github_default_and_legacy_gitee_version_selection(self):
+        self.assertEqual(DEFAULT_SOURCE, 'github')
         item = gitee_release()
         selected = find_update([item], 'beta0.1.3', source='gitee')
         self.assertEqual(selected.tag, 'beta0.1.4')

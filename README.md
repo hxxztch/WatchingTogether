@@ -37,7 +37,7 @@
 | 图片与 GIF | 原文件最大 10 MB；发送静态图片最高 512 KB，GIF 最高 1 MB |
 | 快捷键 | 空格播放 / 暂停，左右方向键每次跳转 5 秒 |
 | 配置保存 | 保存昵称、服务器地址、bilibili 登录状态及更新源选择 |
-| 客户端更新 | Gitee / GitHub 更新源，便携版支持差异更新 |
+| 客户端更新 | GitHub 更新源，便携版支持差异更新 |
 
 ---
 
@@ -67,13 +67,11 @@ py -3 -m venv .venv
 
 ### 客户端更新与自动发布
 
-「设置 → 更新源」默认选择 **Gitee**，可切换为 **GitHub**。便携版启动后检查同一 beta 通道的新版本，也可在设置页手动检查、下载更新和查看发布页。
+「设置 → 更新源」默认选择 **GitHub**。Gitee 更新已暂停。便携版可在启动时检查更新，也可在设置页手动检查、下载更新和查看发布页。
 
 便携版优先使用适用的差异包，点击「安装更新并重启」后安装；个人 `config.json` 和 `stickers` 表情库保留。源码运行时提供完整便携包下载。若旧版更新器安装失败，可关闭旧客户端，将完整包解压到新目录，再迁移 `config.json` 和 `stickers`。
 
-Gitee 的分段附件在软件内下载时自动合并、校验。手动下载时需取得全部分段和发行页提供的 `merge-betaX.Y.Z.cmd`，运行合并脚本后解压完整 ZIP。
-
-项目在统一的 `beta` 分支开发。发布时修改 `app/version.py` 中的版本，并更新 `更新日志.txt` 首节，推送 `beta` 后由 [GitHub Actions](.github/workflows/release-beta.yml)构建完整包和差异包、创建对应版本标签，以正式 Release（Latest）发布，并同步 Gitee 源码、附件及两端更新清单。已发布的版本不会因普通提交而重复打包；每个小版本使用标签记录，不再单独建立长期分支。Gitee 自动同步使用仓库的 `GITEE_TOKEN` Actions Secret。
+项目在统一的 `beta` 分支开发。发布时修改 `app/version.py` 中的版本，并更新 `更新日志.txt` 首节，推送 `beta` 后由 [GitHub Actions](.github/workflows/release-beta.yml)构建完整包和差异包、创建对应版本标签，以正式 Release（Latest）发布，并刷新 GitHub 更新清单。Gitee 仅通过 `GITEE_TOKEN` Actions Secret 同步源码分支。已发布的版本不会因普通提交而重复打包。
 
 ### 启动服务端
 
@@ -249,7 +247,7 @@ watching-together/
 
 ## 版本通道
 
-设置中可独立选择更新源（Gitee / GitHub）与更新通道。稳定版沿用 `betaX.Y.Z` 标签和 `beta` 主线；测试版使用 `testX.Y.Z` 标签，包含 P2P 实验分支的局域网房主推流。
+GitHub 更新源提供稳定版和测试版通道。稳定版沿用 `betaX.Y.Z` 标签与 `beta` 主线，测试版使用 `testX.Y.Z` 标签。
 
 两个通道均提供切换入口，允许从较高编号的测试版返回稳定版。存在对应差异包时优先使用差异包，否则校验完整包后安装；安装时退出当前房间并重启，保留个人配置、B站登录与收藏表情。源码运行只下载便携包，不覆盖源码目录。
 

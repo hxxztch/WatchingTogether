@@ -171,30 +171,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: python packaging/invalidate_republished_deltas.py
-      - name: Mirror version tag, release assets and update feed to Gitee
-        shell: pwsh
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GIT_LFS_SKIP_PUSH: '1'
-        run: |
-          if (-not $env:GITEE_TOKEN) { throw 'Configure the GITEE_TOKEN repository secret' }
-          $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("hxxztch:$env:GITEE_TOKEN"))
-          Write-Output "::add-mask::$basic"
-          git remote add gitee https://gitee.com/hxxztch/watching-together.git
-          git fetch origin "+refs/tags/$env:RELEASE_VERSION`:refs/tags/$env:RELEASE_VERSION"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch published version tag' }
-          # Manual retries use the existing immutable version tag, not the newer HEAD.
-          if ($env:REPUBLISH_VERSION -eq $env:RELEASE_VERSION) {
-            git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push --force gitee "refs/tags/$env:RELEASE_VERSION"
-          } else {
-            git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "refs/tags/$env:RELEASE_VERSION"
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'Could not mirror version tag' }
-          if (Test-Path -LiteralPath "dist/beta-archives/$env:RELEASE_VERSION.zip") {
-            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir dist/beta-archives
-          } else {
-            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir "dist/gitee-$env:RELEASE_VERSION" --from-github
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'Gitee release publication failed' }

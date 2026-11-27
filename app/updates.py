@@ -26,7 +26,8 @@ SOURCES = {
         'https://api.github.com/repos/hxxztch/WatchingTogether/releases?per_page=30',
         'https://github.com/hxxztch/WatchingTogether/releases'),
 }
-DEFAULT_SOURCE = 'gitee'
+DEFAULT_SOURCE = 'github'
+GITEE_PAUSED_MESSAGE = '此通道已经暂停更新，请使用 GitHub 通道检查更新。'
 RELEASES_API = SOURCES['github'].api_url
 RELEASES_FEED = SOURCES['github'].feed_url
 RELEASES_PAGE = SOURCES['github'].page_url
