@@ -51,6 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
+          RETRY_MIRROR_VERSION: ${{ contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') && 'test0.1.9' || '' }}
         run: python packaging/prepare_release.py
   release:
     needs: plan
@@ -167,6 +168,7 @@ jobs:
       - name: Mirror version tag, release assets and update feed to Gitee
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GIT_LFS_SKIP_PUSH: '1'
         run: |
@@ -183,5 +185,18 @@ jobs:
             git -c "http.extraHeader=Authorization: Basic $basic" -c credential.helper= push gitee "refs/tags/$env:RELEASE_VERSION"
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror version tag' }
-          python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir "dist/gitee-$env:RELEASE_VERSION" --from-github
-          if ($LASTEXITCODE -ne 0) { throw 'Gitee release publication failed' }
+          $assets = 'dist/beta-archives'
+          if (-not (Test-Path -LiteralPath "$assets/$env:RELEASE_VERSION.zip")) {
+            New-Item -ItemType Directory -Force -Path $assets | Out-Null
+            gh release download $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --dir $assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not fetch verified GitHub release assets' }
+          }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            python packaging/publish_gitee.py --tag $env:RELEASE_VERSION --assets-dir $assets 2>&1 | Tee-Object -Variable lines
+            $publishExit = $LASTEXITCODE
+            if ($publishExit -eq 0) { break }
+            $reason = $lines | Where-Object { "$_" -like 'Gitee publication failed:*' } | Select-Object -Last 1
+            if ($reason) { Write-Output "::warning::$reason" }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 10 }
+          }
+          if ($publishExit -ne 0) { throw 'Gitee release publication failed' }

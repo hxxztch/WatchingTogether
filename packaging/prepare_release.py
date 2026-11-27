@@ -40,7 +40,8 @@ def main():
                          capture_output=True, text=True)
     tag_commit = tag.stdout.strip() if tag.returncode == 0 else None
     result = plan(version, os.environ["GITHUB_SHA"], tag_commit, release,
-                  os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch")
+                  os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or
+                  os.environ.get("RETRY_MIRROR_VERSION") == version)
     if os.environ.get('REPUBLISH_VERSION') == version:
         result = {'version': version, 'publish': True, 'build': True}
     if result["build"]:

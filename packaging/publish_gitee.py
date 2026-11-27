@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 from urllib.parse import urljoin
 
 import requests
@@ -94,6 +95,18 @@ def public_download(url, expected, destination=None, provider='gitee'):
     raise ValueError('Too many download redirects')
 
 
+def verify_gitee_attachment(url, expected):
+    # New attachments can take a moment to become anonymously downloadable.
+    for delay in (0, 3, 8, 15):
+        if delay:
+            time.sleep(delay)
+        try:
+            return public_download(url, expected)
+        except (RuntimeError, requests.RequestException):
+            if delay == 15:
+                raise
+
+
 class Gitee:
     def __init__(self, token):
         self.token = token
@@ -120,15 +133,15 @@ class Gitee:
         if old:
             url = urljoin('https://gitee.com', old.get('browser_download_url', ''))
             try:
-                size = public_download(url, expected)
+                size = verify_gitee_attachment(url, expected)
                 return {'url': url, 'digest': expected, 'size': size}
-            except (ValueError, RuntimeError):
+            except ValueError:
                 self.api('DELETE', '/releases/{}/attach_files/{}'.format(release_id, old['id']))
         print('Uploading ' + path.name, flush=True)
         with path.open('rb') as source:
             item = self.api('POST', '/releases/{}/attach_files'.format(release_id), file=source)
         url = urljoin('https://gitee.com', item.get('browser_download_url', ''))
-        size = public_download(url, expected)
+        size = verify_gitee_attachment(url, expected)
         if size != path.stat().st_size:
             raise ValueError('Published size mismatch')
         print('Anonymous download verified: ' + path.name, flush=True)
