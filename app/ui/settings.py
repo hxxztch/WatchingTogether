@@ -13,7 +13,9 @@ from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal, QThread
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkProxyFactory,
                                QNetworkReply, QNetworkRequest)
-from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget, QMessageBox
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+                               QHBoxLayout, QPlainTextEdit, QPushButton, QTextEdit,
+                               QVBoxLayout, QWidget, QMessageBox)
 
 from app.updates import (SOURCES, DEFAULT_SOURCE, CHANNELS, channel_for_version,
                          decode_release_feed, find_update, valid_download_url)
@@ -78,7 +80,13 @@ class SettingsPage(QWidget):
         layout.setSpacing(22)
         layout.addWidget(label("设置", "heading"))
         version_card, version_layout = card("版本更新")
-        version_layout.addWidget(label("当前版本：" + CLIENT_VERSION, "cardTitle"))
+        version_row = QHBoxLayout()
+        version_row.addWidget(label("当前版本：" + CLIENT_VERSION, "cardTitle"))
+        version_row.addStretch()
+        self.changelog_button = QPushButton("更新日志")
+        self.changelog_button.clicked.connect(self.show_changelog)
+        version_row.addWidget(self.changelog_button)
+        version_layout.addLayout(version_row)
         channel_row = QHBoxLayout()
         channel_row.addWidget(label('更新通道'))
         self.channel_combo = QComboBox()
@@ -89,7 +97,7 @@ class SettingsPage(QWidget):
         channel_row.addWidget(self.channel_combo)
         channel_row.addStretch()
         version_layout.addLayout(channel_row)
-        version_layout.addWidget(label('测试版支持房间语音。切换版本通道时会保留配置和收藏表情。', 'subtle', True))
+        version_layout.addWidget(label('切换版本通道时会保留配置和收藏表情。', 'subtle', True))
         source_row = QHBoxLayout()
         source_row.addWidget(label('更新源'))
         self.source_combo = QComboBox()
@@ -140,6 +148,30 @@ class SettingsPage(QWidget):
             "subtle", True))
         layout.addWidget(version_card)
         layout.addStretch()
+
+    def show_changelog(self):
+        root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
+        try:
+            notes = (root / 'assets' / 'release_notes.txt').read_text(encoding='utf-8')
+        except (OSError, UnicodeError):
+            notes = '更新日志暂不可用。'
+        dialog = QDialog(self)
+        try:
+            dialog.setWindowTitle('更新日志')
+            dialog.resize(560, 360)
+            layout = QVBoxLayout(dialog)
+            entries = QPlainTextEdit(dialog)
+            entries.setReadOnly(True)
+            entries.setPlainText(notes)
+            layout.addWidget(entries)
+            buttons = QDialogButtonBox(dialog)
+            close = buttons.addButton('关闭', QDialogButtonBox.RejectRole)
+            close.setDefault(True)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def _change_channel(self, *_):
         selected = self.channel_combo.currentData()

@@ -35,7 +35,6 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not mirror beta source' }
   plan:
-    needs: sync_source
     if: github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/test/room-voice'
     runs-on: windows-latest
     outputs:

@@ -377,8 +377,6 @@ class DesktopShell(QWidget):
         self.playback_notice = label("若在网页视频播放中出现画面卡住、音频正常的情况，请切换一次清晰度。", "subtle", True)
         self.playback_notice.setObjectName('playbackNotice')
         notices_layout.addWidget(self.playback_notice)
-        notices_layout.addWidget(label("内置房间可在聊天室加入语音，按住说话按钮开启麦克风。", "subtle", True))
-        notices_layout.addWidget(label("beta0.1.6：放宽了图片和 GIF 大小限制。原始文件支持 10MB，发送后静态图片最高 512KB、GIF 最高 1MB。", "subtle", True))
         layout.addWidget(notices)
         layout.addStretch()
         layout.addWidget(label("不同的地点，同一段时光。", "subtle"), alignment=Qt.AlignCenter)
