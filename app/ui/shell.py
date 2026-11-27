@@ -377,6 +377,16 @@ class DesktopShell(QWidget):
         self.playback_notice = label("若在网页视频播放中出现画面卡住、音频正常的情况，请切换一次清晰度。", "subtle", True)
         self.playback_notice.setObjectName('playbackNotice')
         notices_layout.addWidget(self.playback_notice)
+        update_notice = label(
+            '如更新中断或失败，请手动前往 '
+            '<a href="https://github.com/hxxztch/WatchingTogether/releases">GitHub 发布页</a>'
+            ' 下载最新的完整包。',
+            'subtle',
+            True,
+        )
+        update_notice.setTextFormat(Qt.RichText)
+        update_notice.setOpenExternalLinks(True)
+        notices_layout.addWidget(update_notice)
         layout.addWidget(notices)
         layout.addStretch()
         layout.addWidget(label("不同的地点，同一段时光。", "subtle"), alignment=Qt.AlignCenter)
