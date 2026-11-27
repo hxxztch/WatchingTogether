@@ -51,7 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
-          RETRY_MIRROR_VERSION: ${{ contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') && 'test0.1.9' || '' }}
+          RETRY_MIRROR_VERSION: ${{ (contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') || contains(github.event.head_commit.message, '[retire-017-to-019-delta]')) && 'test0.1.9' || '' }}
         run: python packaging/prepare_release.py
   release:
     needs: plan
@@ -111,6 +111,8 @@ jobs:
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           foreach ($release in $releases) {
             $old = [string]$release.tag_name
+            # Several beta0.1.7 packages share the version but have different file hashes.
+            if ($old -eq 'beta0.1.7') { continue }
             if ($old -notmatch '^(beta|test)\d+\.\d+\.\d+$' -or $old -eq $env:RELEASE_VERSION) { continue }
             if ([version]($old -replace '^(beta|test)', '') -gt $current) { continue }
             if (-not ($release.assets | Where-Object { $_.name -eq "$old.zip" })) { continue }
@@ -153,6 +155,30 @@ jobs:
           prerelease: ${{ startsWith(env.RELEASE_VERSION, 'test') }}
           make_latest: ${{ startsWith(env.RELEASE_VERSION, 'test') && 'false' || 'true' }}
           body_path: release-notes.txt
+      - name: Back up the incompatible beta0.1.7 delta
+        if: env.RELEASE_VERSION == 'test0.1.9' && contains(github.event.head_commit.message, '[retire-017-to-019-delta]')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download test0.1.9 --repo $env:GITHUB_REPOSITORY --pattern 'beta0.1.7-to-test0.1.9.delta.*' --dir retired-delta
+          if ($LASTEXITCODE -ne 0) { throw 'Could not back up the delta before withdrawing it' }
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE_VERSION == 'test0.1.9' && contains(github.event.head_commit.message, '[retire-017-to-019-delta]')
+        with:
+          name: retired-beta0.1.7-to-test0.1.9-delta
+          path: retired-delta/
+          if-no-files-found: error
+      - name: Withdraw the incompatible beta0.1.7 delta
+        if: env.RELEASE_VERSION == 'test0.1.9' && contains(github.event.head_commit.message, '[retire-017-to-019-delta]')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          foreach ($asset in @('beta0.1.7-to-test0.1.9.delta.zip', 'beta0.1.7-to-test0.1.9.delta.json')) {
+            gh release delete-asset test0.1.9 $asset --repo $env:GITHUB_REPOSITORY --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not withdraw $asset" }
+          }
       - name: Publish static beta update feed
         shell: pwsh
         env:
@@ -166,6 +192,7 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: python packaging/invalidate_republished_deltas.py
       - name: Mirror version tag, release assets and update feed to Gitee
+        if: "!contains(github.event.head_commit.message, '[retire-017-to-019-delta]')"
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
