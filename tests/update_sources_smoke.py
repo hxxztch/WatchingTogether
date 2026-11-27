@@ -1,5 +1,4 @@
 """Real Qt HTTP checks for provider switching and multipart/delta downloads."""
-import base64
 import hashlib
 import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +21,7 @@ from PySide6.QtCore import QStandardPaths, QUrl
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWidgets import QApplication, QMessageBox
 from app.ui.settings import SettingsPage
-from app.updates import MANIFEST_START, MANIFEST_END
+from app.updates import GITEE_PAUSED_MESSAGE
 from app.version import CLIENT_VERSION
 import app.config as config
 
@@ -48,18 +47,18 @@ def main():
             'removed': [],
         }))
     delta = delta_file.getvalue()
-    base = 'https://gitee.com/attachments/download/'
+    base = 'https://github.com/hxxztch/WatchingTogether/releases/download/'
     full = {'name': NEXT_VERSION + '.zip', 'browser_download_url': base + '1/full.001',
             'digest': sha(data), 'size': len(data),
             'parts': [{'url': base + str(i + 1) + '/full.00' + str(i + 1),
                        'digest': sha(chunk), 'size': len(chunk)} for i, chunk in enumerate(chunks)]}
     diff = {'name': CLIENT_VERSION + '-to-' + NEXT_VERSION + '.delta.zip',
             'browser_download_url': base + '3/change.delta.zip', 'digest': sha(delta), 'size': len(delta)}
-    release = {'tag_name': NEXT_VERSION, 'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + NEXT_VERSION,
+    release = {'tag_name': NEXT_VERSION, 'html_url': 'https://github.com/hxxztch/WatchingTogether/releases/tag/' + NEXT_VERSION,
                'assets': [full, diff]}
     test_version = 'test' + NEXT_VERSION[4:]
     test_release = {'tag_name': test_version,
-        'html_url': 'https://gitee.com/hxxztch/watching-together/releases/' + test_version,
+        'html_url': 'https://github.com/hxxztch/WatchingTogether/releases/tag/' + test_version,
         'assets': [dict(full, name=test_version + '.zip')]}
     state = {'bad': False, 'fail_feed': False, 'interrupt': None}
     calls = []
@@ -70,12 +69,11 @@ def main():
             calls.append(self.path)
             path = urlsplit(self.path).path
             status = 200
-            if path.endswith('/contents/releases.json'):
+            if path.endswith('/releases.json'):
                 status = 404 if state['fail_feed'] else 200
-                content = json.dumps({'encoding': 'base64', 'content': base64.b64encode(json.dumps([release, test_release]).encode()).decode()}).encode()
+                content = json.dumps([release, test_release]).encode()
             elif path.endswith('/releases'):
-                body = MANIFEST_START + base64.b64encode(json.dumps(release).encode()).decode() + MANIFEST_END
-                content = json.dumps([{'tag_name': NEXT_VERSION, 'body': body}]).encode()
+                content = json.dumps([release, test_release]).encode()
             elif path.endswith('full.001'):
                 content = chunks[0]
             elif path.endswith('full.002'):
@@ -142,10 +140,10 @@ def main():
             config.save(update_channel='stable')
             page = SettingsPage()
             page.show()
-            assert page.source_combo.currentData() == 'gitee'
+            assert page.source_combo.currentData() == 'github'
             page.check_updates()
             wait(lambda: page._check_reply is None)
-            assert page._release and page._release.source == 'gitee'
+            assert page._release and page._release.source == 'github'
             page.channel_combo.setCurrentIndex(page.channel_combo.findData('test'))
             wait(lambda: page._check_reply is None)
             assert page._release.tag == test_version and not page._release.delta_url
@@ -198,23 +196,29 @@ def main():
                     assert page._force_full and not page._download_is_delta
                     assert page._target.read_bytes() == data and page.install_button.isVisible()
                     assert baseline.read_bytes() == b'local rebuild'
-            page.source_combo.setCurrentIndex(page.source_combo.findData('github'))
-            wait(lambda: page._check_reply is None)
-            assert page._release is None and not page.install_button.isVisible()
-            assert config.load()['update_source'] == 'github'
-            state['fail_feed'] = True
+            request_count = len(calls)
             page.source_combo.setCurrentIndex(page.source_combo.findData('gitee'))
-            wait(lambda: page._check_reply is None)
-            assert page._release and page._check_source == 'api'
-            assert any('/api/v5/repos/' in call and '/releases?' in call for call in calls)
-            page.stop()
-            page.close()
+            page.check_updates()
+            app.processEvents()
+            assert page._release is None and not page.install_button.isVisible()
+            assert page.status.text() == GITEE_PAUSED_MESSAGE
+            assert len(calls) == request_count and page._check_reply is None
+            assert config.load()['update_source'] == 'gitee'
             restored = SettingsPage()
+            restored.check_updates(True)
             assert restored.source_combo.currentData() == 'gitee'
+            assert restored.status.text() == GITEE_PAUSED_MESSAGE and restored._check_reply is None
             restored.stop()
             restored.close()
+            state['fail_feed'] = True
+            page.source_combo.setCurrentIndex(page.source_combo.findData('github'))
+            wait(lambda: page._check_reply is None)
+            assert page._release and page._check_source == 'api'
+            assert any('/repos/hxxztch/WatchingTogether/releases?' in call for call in calls)
+            page.stop()
+            page.close()
             assert not errors, errors
-            print('PASS: default/persisted source; provider API fallback; multipart merge/hash; corrupt part preserves prior ZIP; delta download/install controls')
+            print('PASS: GitHub default and API fallback; paused Gitee sends no requests; resume, verification and delta installation')
     finally:
         config.CONFIG_PATH = original_config
         server.shutdown()

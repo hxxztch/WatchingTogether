@@ -1,4 +1,4 @@
-"""Version controls with independent Gitee and GitHub update sources."""
+"""Version controls for the active GitHub update source."""
 import hashlib
 import json
 import logging
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
                                QHBoxLayout, QPlainTextEdit, QPushButton, QTextEdit,
                                QVBoxLayout, QWidget, QMessageBox)
 
-from app.updates import (SOURCES, DEFAULT_SOURCE, CHANNELS, channel_for_version,
+from app.updates import (SOURCES, DEFAULT_SOURCE, GITEE_PAUSED_MESSAGE, CHANNELS, channel_for_version,
                          decode_release_feed, find_update, valid_download_url)
 from app.config import load, save
 from app.version import CLIENT_VERSION
@@ -127,7 +127,7 @@ class SettingsPage(QWidget):
         source_row.addWidget(self.source_combo)
         source_row.addStretch()
         version_layout.addLayout(source_row)
-        self.status = label("尚未检查更新", "subtle", True)
+        self.status = label(GITEE_PAUSED_MESSAGE if self._source == 'gitee' else '尚未检查更新', "subtle", True)
         version_layout.addWidget(self.status)
         self.release_label = label("", "subtle", True)
         self.release_label.hide()
@@ -154,6 +154,7 @@ class SettingsPage(QWidget):
         actions.addWidget(self.install_button)
         self.release_button = QPushButton('查看 ' + SOURCES[self._source].name + ' 发布页')
         self.release_button.clicked.connect(self.open_release)
+        self.release_button.setVisible(self._source == 'github')
         actions.addWidget(self.release_button)
         actions.addStretch()
         version_layout.addLayout(actions)
@@ -217,6 +218,7 @@ class SettingsPage(QWidget):
             return
         self._source = selected
         self.release_button.setText('查看 ' + SOURCES[selected].name + ' 发布页')
+        self.release_button.setVisible(selected == 'github')
         self._reset_selection()
 
     def _reset_selection(self):
@@ -257,6 +259,10 @@ class SettingsPage(QWidget):
 
     def check_updates(self, automatic=False):
         if self._closing or self._check_reply is not None or self._downloading or self._prepare_worker:
+            return
+        if self._source == 'gitee':
+            self.check_button.setEnabled(True)
+            self.status.setText(GITEE_PAUSED_MESSAGE)
             return
         if not self._tls_ready:
             self.status.setText('Windows 安全连接组件不可用，请重新解压完整客户端，或从发布页手动下载。')
@@ -381,6 +387,9 @@ class SettingsPage(QWidget):
 
     def download_update(self):
         if self._closing or self._downloading or self._prepare_worker or self._release is None:
+            return
+        if self._source == 'gitee':
+            self.status.setText(GITEE_PAUSED_MESSAGE)
             return
         self._download_is_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url and not self._force_full)
         record_action("update.download", version=self._release.tag,
