@@ -63,10 +63,19 @@ def run(public):
         sender.socket.sendBinaryMessage(frame)
         wait(lambda: received)
         assert len(receiver.codec.decode(received[0][0], received[0][1:])) == 1920
+        previous_socket = receiver.socket
+        receiver.connection_failed('smoke_link_drop')
+        assert guest._room_ready and receiver.retry.isActive()
+        wait(lambda: receiver.ready and receiver.socket is not previous_socket, 25)
+        assert guest._room_ready and receiver.source is None
+        received.clear()
+        receiver.socket.binaryMessageReceived.connect(lambda frame: received.append(bytes(frame)))
+        sender.socket.sendBinaryMessage(frame)
+        wait(lambda: received)
         host._on_leave_room()
         wait(lambda: not guest._room_ready and receiver.socket is None)
         assert sender.socket is None and not errors, errors
-        print('PASS: two Qt clients joined voice, delivered Opus, and cleaned up on disband')
+        print('PASS: two Qt clients delivered Opus, recovered a voice connection, and cleaned up on disband')
     finally:
         guest.close()
         host.close()

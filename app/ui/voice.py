@@ -1,6 +1,5 @@
 """Optional room voice controls. Audio devices are opened only on demand."""
 from array import array
-from collections import deque
 import logging
 import math
 import time
@@ -11,6 +10,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBo
                                QVBoxLayout, QWidget)
 
 from app.voice_codec import MAX_PACKET, RATE, SAMPLES
+from app.voice_buffer import VoiceBuffer
 from app.voice_relay import VOICE_LIMIT
 
 
@@ -27,6 +27,12 @@ class RoomVoice(QWidget):
         self.media_devices = None
         self.selected_input = self.selected_output = None
         self.ready = False
+        self.phase = 'idle'
+        self.attempt = 0
+        self.phase_started = 0.0
+        self.ping_started = None
+        self.rtt = None
+        self.capture_drops = 0
         self.key_held = False
         self.frames = {}
         self.pcm = bytearray()
@@ -103,9 +109,13 @@ class RoomVoice(QWidget):
         layout.addWidget(self.status)
 
         self.timer = QTimer(self, interval=20, timerType=Qt.PreciseTimer)
-        self.timer.timeout.connect(self.play_frame)
-        self.deadline = QTimer(self, singleShot=True, interval=8000)
-        self.deadline.timeout.connect(lambda: self.stop('语音连接超时，请重试'))
+        self.timer.timeout.connect(self.audio_tick)
+        self.deadline = QTimer(self, singleShot=True)
+        self.deadline.timeout.connect(lambda: self.connection_failed('timeout'))
+        self.retry = QTimer(self, singleShot=True)
+        self.retry.timeout.connect(self.connect_voice)
+        self.health_timer = QTimer(self, interval=5000)
+        self.health_timer.timeout.connect(self.check_health)
         QApplication.instance().applicationStateChanged.connect(self.application_state)
         self.hide()
 
@@ -176,11 +186,16 @@ class RoomVoice(QWidget):
         self.setVisible(bool(ticket))
 
     def toggle(self):
-        if self.socket:
+        if self.socket or self.retry.isActive():
             self.stop()
-            return
+        elif self.ticket:
+            self.attempt = 0
+            self.connect_voice()
+
+    def connect_voice(self):
         if not self.ticket:
             return
+        self.attempt += 1
         try:
             from PySide6.QtMultimedia import QMediaDevices
             from PySide6.QtWebSockets import QWebSocket
@@ -202,8 +217,11 @@ class RoomVoice(QWidget):
             self.socket.errorOccurred.connect(self.connection_error)
             self.socket.textMessageReceived.connect(self.on_text)
             self.socket.binaryMessageReceived.connect(self.on_audio)
+            self.socket.pong.connect(self.on_pong)
             self.socket.setMaxAllowedIncomingMessageSize(1024)
-            self.deadline.start()
+            self.phase = 'connect'
+            self.phase_started = time.monotonic()
+            self.deadline.start(15000 if self.url.startswith('wss:') else 5000)
             self.join.setText('取消连接')
             self.status.setText('正在连接语音…')
             self.socket.open(QUrl(self.url + '/voice'))
@@ -212,21 +230,71 @@ class RoomVoice(QWidget):
 
     def authenticate(self):
         if self.sender() is self.socket:
+            logging.info('Voice transport connected duration_ms=%d', (time.monotonic() - self.phase_started) * 1000)
+            self.phase = 'authenticate'
+            self.phase_started = time.monotonic()
+            self.deadline.start(6000)
             self.socket.sendTextMessage(self.ticket)
 
     def disconnected(self):
         if self.sender() is self.socket:
-            full = self.socket.closeCode() == 1013
-            self.stop('语音人数已满（最多 6 人）' if full else '语音已断开，请重新加入')
+            code = self.socket.closeCode()
+            code = getattr(code, 'value', code)
+            if code == 1008:
+                self.stop('房间语音会话已失效，请重新加入房间')
+            else:
+                self.connection_failed('close_' + str(code))
 
     def connection_error(self, error):
         if self.sender() is self.socket:
-            self.stop('语音连接失败，请检查网络后重试')
+            from PySide6.QtNetwork import QAbstractSocket
+            # A graceful server close may carry an admission or capacity error.
+            if error == QAbstractSocket.RemoteHostClosedError:
+                return
+            if error == QAbstractSocket.SslHandshakeFailedError:
+                self.stop('语音安全连接失败，请检查网络与系统时间')
+                logging.warning('Voice TLS handshake failed')
+                return
+            self.connection_failed(getattr(error, 'name', 'socket_error'))
+
+    def connection_failed(self, reason):
+        logging.info('Voice failed phase=%s reason=%s attempt=%d', self.phase, reason, self.attempt)
+        message = '语音人数已满或已有连接，请稍后重试' if reason == 'close_1013' else '语音连接失败，请检查网络后重试'
+        self.stop(message)
+        if self.ticket and self.attempt < 3:
+            self.join.setText('取消重连')
+            self.status.setText('语音连接中断，正在重试…')
+            self.retry.start(1000 * self.attempt)
+
+    def check_health(self):
+        if not self.ready:
+            return
+        now = time.monotonic()
+        if self.ping_started is not None:
+            if now - self.ping_started >= 10:
+                self.connection_failed('pong_timeout')
+            return
+        self.ping_started = now
+        self.socket.ping()
+        self.health_ticks += 1
+        if self.health_ticks % 3 == 0:
+            self.attempt = 1
+            logging.info('Voice stats rtt_ms=%s capture_drops=%d playback_drops=%d underruns=%d',
+                         self.rtt, self.capture_drops, sum(x.dropped for x in self.frames.values()),
+                         sum(x.underruns for x in self.frames.values()))
+
+    def on_pong(self, elapsed, _payload):
+        if self.sender() is self.socket:
+            self.ping_started = None
+            self.rtt = elapsed
 
     def on_text(self, message):
         if self.sender() is not self.socket or message != 'ready' or self.ready:
             return
         self.ready = True
+        logging.info('Voice ready auth_ms=%d', (time.monotonic() - self.phase_started) * 1000)
+        self.phase = 'stream'
+        self.health_ticks = self.capture_drops = 0
         QApplication.instance().installEventFilter(self)
         self.deadline.stop()
         self.join.setText('退出语音')
@@ -235,6 +303,7 @@ class RoomVoice(QWidget):
         self.status.setText('语音已连接 · 麦克风关闭')
         self.change_output()
         self.timer.start()
+        self.health_timer.start()
 
     @staticmethod
     def refresh_devices(combo, devices, default):
@@ -412,19 +481,34 @@ class RoomVoice(QWidget):
         pcm, self.input_rate_state = audioop.ratecv(
             pcm, 2, 1, self.input_format.sampleRate(), RATE, self.input_rate_state)
         self.pcm.extend(pcm)
+        self.trim_capture(5)
+
+    def trim_capture(self, keep_frames):
         size = SAMPLES * 2
-        if len(self.pcm) >= size * 4 or self.socket.bytesToWrite() > 4096:
-            self.pcm.clear()
+        excess = len(self.pcm) // size - keep_frames
+        if excess > 0:
+            del self.pcm[:excess * size]
+            self.capture_drops += excess
+
+    def audio_tick(self):
+        if self.capture and self.ready and len(self.pcm) >= SAMPLES * 2:
+            self.send_frame()
+        self.play_frame()
+
+    def send_frame(self):
+        import audioop
+        if self.socket.bytesToWrite() > 384:
+            self.trim_capture(2)
             return
+        size = SAMPLES * 2
+        frame = bytes(self.pcm[:size])
+        del self.pcm[:size]
         gain = self.input_volume.value() / UNITY_VOLUME
-        while len(self.pcm) >= size:
-            frame = bytes(self.pcm[:size])
-            del self.pcm[:size]
-            if gain != 1.0:
-                frame = audioop.mul(frame, 2, gain)
-            packet = self.codec.encode(frame)
-            if packet:
-                self.socket.sendBinaryMessage(packet)
+        if gain != 1.0:
+            frame = audioop.mul(frame, 2, gain)
+        packet = self.codec.encode(frame)
+        if packet:
+            self.socket.sendBinaryMessage(packet)
 
     def stop_capture(self):
         self.key_held = False
@@ -447,19 +531,21 @@ class RoomVoice(QWidget):
         packet = bytes(message)
         slot = packet[0]
         if slot < VOICE_LIMIT:
-            self.frames.setdefault(slot, deque(maxlen=3)).append((time.monotonic(), packet[1:]))
+            buffer = self.frames.get(slot)
+            if buffer is None:
+                buffer = self.frames[slot] = VoiceBuffer()
+            buffer.put(time.monotonic(), packet[1:])
 
     def play_frame(self):
-        if not self.output:
+        if not self.output or self.sink.bytesFree() < self.output_format.bytesForDuration(20000):
             return
         import audioop
         now = time.monotonic()
         frames = []
-        for slot, queue in self.frames.items():
-            while queue and now - queue[0][0] > .1:
-                queue.popleft()
-            if queue:
-                pcm = self.codec.decode(slot, queue.popleft()[1])
+        for slot, buffer in self.frames.items():
+            packet = buffer.take(now)
+            if packet is not None:
+                pcm = self.codec.decode(slot, packet)
                 if pcm:
                     frames.append(pcm)
         mixed = bytes(SAMPLES * 2)
@@ -478,8 +564,12 @@ class RoomVoice(QWidget):
         if self.ready:
             QApplication.instance().removeEventFilter(self)
         self.ready = False
+        self.phase = 'idle'
+        self.ping_started = self.rtt = None
         self.timer.stop()
         self.deadline.stop()
+        self.retry.stop()
+        self.health_timer.stop()
         self.stop_capture()
         if self.socket:
             socket, self.socket = self.socket, None

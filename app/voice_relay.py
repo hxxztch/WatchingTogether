@@ -1,5 +1,6 @@
 """Ephemeral audio streams tied to live room memberships."""
 import asyncio
+import logging
 import secrets
 import time
 from dataclasses import dataclass
@@ -41,7 +42,12 @@ class VoiceRelay:
         while True:
             created, frame = await queue.get()
             if time.monotonic() - created < .12:
-                await asyncio.wait_for(ws.send(frame), .3)
+                try:
+                    await asyncio.wait_for(ws.send(frame), .8)
+                except asyncio.TimeoutError:
+                    logging.info('Voice relay send stalled; closing only the voice connection')
+                    await ws.close(1011)
+                    return
 
     async def handle(self, ws, room):
         stream = None
@@ -58,7 +64,7 @@ class VoiceRelay:
             if slot is None or ticket in self.streams:
                 await ws.close(1013)
                 return
-            stream = Stream(slot, asyncio.Queue(maxsize=5), asyncio.current_task())
+            stream = Stream(slot, asyncio.Queue(maxsize=VOICE_LIMIT * 3), asyncio.current_task())
             self.streams[ticket] = stream
             await ws.send('ready')
             tasks = [asyncio.create_task(self._write(ws, stream.queue)),
@@ -75,15 +81,17 @@ class VoiceRelay:
             await ws.close()
 
     async def _read(self, ws, ticket, slot):
-        allowance = 10
+        allowance = 15
         last = time.monotonic()
         async for frame in ws:
             now = time.monotonic()
-            allowance = min(10, allowance + (now - last) * 55)
+            allowance = min(15, allowance + (now - last) * 55)
             last = now
-            if not isinstance(frame, bytes) or not 1 <= len(frame) <= MAX_FRAME or allowance < 1:
+            if not isinstance(frame, bytes) or not 1 <= len(frame) <= MAX_FRAME:
                 await ws.close(1008)
                 return
+            if allowance < 1:
+                continue
             allowance -= 1
             packet = (now, bytes([slot]) + frame)
             for key, target in self.streams.items():
