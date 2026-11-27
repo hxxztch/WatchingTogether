@@ -43,9 +43,10 @@ class ChannelsTests(unittest.TestCase):
             install = root / 'install'
             install.mkdir()
             stable, test = root / 'stable.zip', root / 'test.zip'
-            files = self.package(stable, 'beta0.1.7', {'stable.exe': b'stable', '_internal/core.dll': b'old'})
+            shared = {'_internal/shared.dll': b'same runtime'}
+            files = self.package(stable, 'beta0.1.7', {'stable.exe': b'stable', '_internal/core.dll': b'old', **shared})
             self.package(test, 'test0.1.8', {'test.exe': b'test', '_internal/core.dll': b'new',
-                                          '_internal/p2p.dll': b'rtc'})
+                                          '_internal/p2p.dll': b'rtc', **shared})
             for name, data in files.items():
                 path = install / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,8 @@ class ChannelsTests(unittest.TestCase):
                 delta = root / ('delta%d.zip' % index)
                 digest = 'sha256:' + hashlib.sha256(package.read_bytes()).hexdigest()
                 prepare_full_update(package, install, old, target, digest, delta)
+                with zipfile.ZipFile(delta) as archive:
+                    self.assertNotIn('files/_internal/shared.dll', archive.namelist())
                 result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                     '-File', str(Path(__file__).resolve().parents[1] / 'packaging/apply_update.ps1'),
                     '-InstallDir', str(install), '-DeltaZip', str(delta), '-FromVersion', old,
@@ -67,6 +70,7 @@ class ChannelsTests(unittest.TestCase):
                 self.assertIn('keep', (install / 'config.json').read_text())
                 self.assertEqual((install / 'stickers/keep.gif').read_bytes(), b'personal')
                 self.assertEqual((install / 'notes.txt').read_bytes(), b'unknown personal file')
+                self.assertEqual((install / '_internal/shared.dll').read_bytes(), b'same runtime')
             self.assertFalse((install / 'test.exe').exists())
             self.assertFalse((install / '_internal/p2p.dll').exists())
             self.assertEqual((install / '_internal/core.dll').read_bytes(), b'old')

@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
+          REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-test0.1.9]') && 'test0.1.9' || contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
           RETRY_MIRROR_VERSION: ${{ (contains(github.event.head_commit.message, '[retry-mirror-test0.1.9]') || contains(github.event.head_commit.message, '[retire-017-to-019-delta]')) && 'test0.1.9' || '' }}
         run: python packaging/prepare_release.py
   release:
@@ -61,7 +61,7 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
       RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-      REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
+      REPUBLISH_VERSION: ${{ contains(github.event.head_commit.message, '[republish-test0.1.9]') && 'test0.1.9' || contains(github.event.head_commit.message, '[republish-beta0.1.7]') && 'beta0.1.7' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +144,15 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$env:RELEASE_VERSION" -f "sha=$env:GITHUB_SHA" -F force=true
+        id: move_release_tag
+        run: |
+          git ls-remote --exit-code --refs origin "refs/tags/$env:RELEASE_VERSION"
+          $lookupExit = $LASTEXITCODE
+          if ($lookupExit -eq 2) { exit 0 }
+          if ($lookupExit -ne 0) { throw 'Could not check the published tag' }
+          gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$env:RELEASE_VERSION" -f "sha=$env:GITHUB_SHA" -F force=true
+          if ($LASTEXITCODE -ne 0) { throw 'Could not move the published tag' }
+          "moved=true" >> $env:GITHUB_OUTPUT
       - uses: softprops/action-gh-release@v2
         if: needs.plan.outputs.build == 'true'
         with:
@@ -185,7 +193,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python packaging/publish_update_feed.py
       - name: Invalidate outgoing deltas built from the previous same-version files
-        if: env.REPUBLISH_VERSION == env.RELEASE_VERSION
+        if: steps.move_release_tag.outputs.moved == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

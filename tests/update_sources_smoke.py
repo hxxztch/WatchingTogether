@@ -1,6 +1,7 @@
 """Real Qt HTTP checks for provider switching and multipart/delta downloads."""
 import base64
 import hashlib
+import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
@@ -18,7 +20,7 @@ from app.runtime import configure_runtime
 configure_runtime()
 from PySide6.QtCore import QStandardPaths, QUrl
 from PySide6.QtNetwork import QNetworkRequest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from app.ui.settings import SettingsPage
 from app.updates import MANIFEST_START, MANIFEST_END
 from app.version import CLIENT_VERSION
@@ -38,7 +40,14 @@ def main():
     sys.excepthook = lambda kind, value, tb: errors.append(str(value))
     data = b'complete portable zip fixture'
     chunks = (data[:12], data[12:])
-    delta = b'only changed files fixture'
+    delta_file = io.BytesIO()
+    with zipfile.ZipFile(delta_file, 'w') as archive:
+        archive.writestr('manifest.json', json.dumps({
+            'schema': 1, 'from_version': CLIENT_VERSION, 'to_version': NEXT_VERSION,
+            'files': [{'path': 'baseline.dll', 'old_sha256': hashlib.sha256(b'official').hexdigest()}],
+            'removed': [],
+        }))
+    delta = delta_file.getvalue()
     base = 'https://gitee.com/attachments/download/'
     full = {'name': NEXT_VERSION + '.zip', 'browser_download_url': base + '1/full.001',
             'digest': sha(data), 'size': len(data),
@@ -134,6 +143,24 @@ def main():
                 page.download_update()
                 wait(lambda: not page._downloading)
                 assert page._target.read_bytes() == delta and page.install_button.isVisible()
+                install = Path(temporary) / 'install'
+                install.mkdir()
+                baseline = install / 'baseline.dll'
+                baseline.write_bytes(b'official')
+                with patch.object(sys, 'executable', str(install / 'client.exe')), \
+                        patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes), \
+                        patch.object(page, '_launch_install') as launch:
+                    page.install_update()
+                    wait(lambda: page._prepare_worker is None)
+                    launch.assert_called_once_with(page._target)
+                    launch.reset_mock()
+                    baseline.write_bytes(b'local rebuild')
+                    page.install_update()
+                    wait(lambda: page._prepare_worker is None and not page._downloading)
+                    launch.assert_not_called()
+                    assert page._force_full and not page._download_is_delta
+                    assert page._target.read_bytes() == data and page.install_button.isVisible()
+                    assert baseline.read_bytes() == b'local rebuild'
             page.source_combo.setCurrentIndex(page.source_combo.findData('github'))
             wait(lambda: page._check_reply is None)
             assert page._release is None and not page.install_button.isVisible()

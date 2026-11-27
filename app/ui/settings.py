@@ -5,9 +5,9 @@ import logging
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 import tempfile
+from zipfile import BadZipFile
 
 from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal, QThread
 from PySide6.QtGui import QDesktopServices
@@ -22,7 +22,7 @@ from app.updates import (SOURCES, DEFAULT_SOURCE, CHANNELS, channel_for_version,
 from app.config import load, save
 from app.version import CLIENT_VERSION
 from app.diagnostics import record_action, recent_actions
-from app.runtime import configure_qt_tls
+from app.runtime import configure_qt_tls, start_update_helper
 from app.ui.shell import card, label
 
 
@@ -43,6 +43,21 @@ class FullUpdateWorker(QThread):
             shutil.rmtree(str(self.directory), ignore_errors=True)
 
 
+class DeltaCheckWorker(QThread):
+    def __init__(self, arguments, parent):
+        super().__init__(parent)
+        self.arguments = arguments
+        self.matches = False
+        self.error = ''
+
+    def run(self):
+        try:
+            from app.full_update import delta_matches_install
+            self.matches = delta_matches_install(*self.arguments, cancelled=self.isInterruptionRequested)
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, RuntimeError, BadZipFile) as exc:
+            self.error = str(exc)
+
+
 class SettingsPage(QWidget):
     update_available = Signal(str)
 
@@ -61,6 +76,7 @@ class SettingsPage(QWidget):
         self._hash = None
         self._release = None
         self._download_is_delta = False
+        self._force_full = False
         self._expected_digest = ""
         self._manifest_redirects = 0
         self._download_redirects = 0
@@ -208,6 +224,7 @@ class SettingsPage(QWidget):
                 reply.abort()
         self._release = self._target = None
         self._download_is_delta = False
+        self._force_full = False
         for control in (self.release_label, self.diff_files, self.download_button,
                         self.install_button, self.folder_button):
             control.hide()
@@ -286,7 +303,7 @@ class SettingsPage(QWidget):
                 self.status.setText(('可切换至：' if switching else '发现新版本：') + self._release.tag)
                 self.diff_files.hide()
                 self.install_button.hide()
-                has_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url)
+                has_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url and not self._force_full)
                 self.release_label.setText("可用差异包：" + self._release.delta_name if has_delta else
                                            "完整便携包：" + self._release.asset_name)
                 self.release_label.show()
@@ -362,7 +379,7 @@ class SettingsPage(QWidget):
     def download_update(self):
         if self._closing or self._downloading or self._prepare_worker or self._release is None:
             return
-        self._download_is_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url)
+        self._download_is_delta = bool(getattr(sys, "frozen", False) and self._release.delta_url and not self._force_full)
         record_action("update.download", version=self._release.tag,
                       kind="delta" if self._download_is_delta else "full")
         self.install_button.hide()
@@ -390,7 +407,8 @@ class SettingsPage(QWidget):
         self.source_combo.setEnabled(False)
         self.channel_combo.setEnabled(False)
         self.check_button.setEnabled(False)
-        self.status.setText("正在下载 " + asset_name + "…")
+        prefix = '本机文件与差异包不匹配，正在下载完整包：' if self._force_full else '正在下载 '
+        self.status.setText(prefix + asset_name + '…')
         self._start_part()
 
     def _start_part(self):
@@ -523,17 +541,42 @@ class SettingsPage(QWidget):
                     '将从 {} 切换至 {}，并退出客户端安装。个人配置和收藏表情将保留，当前房间会退出。是否继续？'.format(
                         CLIENT_VERSION, self._release.tag)) != QMessageBox.Yes:
                 return
-        if not self._download_is_delta:
+        for control in (self.source_combo, self.channel_combo, self.check_button,
+                        self.download_button, self.install_button):
+            control.setEnabled(False)
+        args = (self._target, Path(sys.executable).resolve().parent, CLIENT_VERSION,
+                self._release.tag, self._expected_digest)
+        if self._download_is_delta:
+            self.status.setText('正在校验本机文件是否适用差异包…')
+            self._prepare_worker = DeltaCheckWorker(args, self)
+            self._prepare_worker.finished.connect(self._delta_checked)
+        else:
             self.status.setText('正在准备完整包安装，请稍候…')
-            for control in (self.source_combo, self.channel_combo, self.check_button,
-                            self.download_button, self.install_button):
-                control.setEnabled(False)
-            self._prepare_worker = FullUpdateWorker(self._target, Path(sys.executable).resolve().parent,
-                CLIENT_VERSION, self._release.tag, self._expected_digest, self)
+            self._prepare_worker = FullUpdateWorker(*args, self)
             self._prepare_worker.finished.connect(self._full_update_prepared)
-            self._prepare_worker.start()
+        self._prepare_worker.start()
+
+    def _delta_checked(self):
+        worker = self._prepare_worker
+        self._prepare_worker = None
+        worker.deleteLater()
+        if self._closing:
             return
-        self._launch_install(self._target)
+        for control in (self.source_combo, self.channel_combo, self.check_button,
+                        self.download_button, self.install_button):
+            control.setEnabled(True)
+        if worker.error:
+            logging.warning('Delta preflight failed: %s', worker.error)
+            self.status.setText('无法验证差异包，请重新下载，或从发布页下载完整包。')
+        elif worker.matches:
+            self._launch_install(self._target)
+        else:
+            record_action('update.fallback_full', reason='baseline_mismatch')
+            self._force_full = True
+            self.release_label.setText('完整便携包：' + self._release.asset_name)
+            self.download_button.setText('下载完整便携包')
+            self.diff_files.hide()
+            self.download_update()
 
     def _full_update_prepared(self):
         worker = self._prepare_worker
@@ -560,12 +603,12 @@ class SettingsPage(QWidget):
             helper_dir = Path(tempfile.mkdtemp(prefix="wt-update-helper-"))
             helper = helper_dir / "apply_update.ps1"
             shutil.copyfile(str(script), str(helper))
-            subprocess.Popen([
-                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            start_update_helper([
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 str(helper), "-InstallDir", str(Path(sys.executable).resolve().parent),
                 "-DeltaZip", str(package), "-FromVersion", CLIENT_VERSION,
                 "-ToVersion", self._release.tag, "-TargetProcessId", str(os.getpid()),
-            ], creationflags=subprocess.CREATE_NO_WINDOW)
+            ], helper_dir)
         except OSError as exc:
             logging.warning("Could not start updater: %s", exc)
             self.status.setText("无法启动更新程序，请手动下载完整便携包。")

@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import re
 import zipfile
 
 INVENTORY = '_internal/package-files.json'
@@ -26,6 +27,40 @@ def file_hash(path):
         for chunk in iter(lambda: source.read(1024 * 1024), b''):
             result.update(chunk)
     return result.hexdigest()
+
+
+def delta_matches_install(package, install, current, target, expected, cancelled=lambda: False):
+    """Distinguish a different installed baseline from a damaged delta."""
+    if expected.lower() != 'sha256:' + file_hash(Path(package)):
+        raise ValueError('Delta package SHA256 mismatch')
+    with zipfile.ZipFile(package) as archive:
+        item = archive.getinfo('manifest.json')
+        if item.file_size > 4 * 1024 ** 2:
+            raise ValueError('Delta manifest is too large')
+        manifest = json.loads(archive.read(item))
+    if (manifest.get('schema') != 1 or manifest.get('from_version') != current
+            or manifest.get('to_version') != target):
+        raise ValueError('Delta version mismatch')
+    install = Path(install).resolve()
+    seen = set()
+    matches = True
+    for kind in ('files', 'removed'):
+        for entry in manifest[kind]:
+            if cancelled():
+                raise ValueError('Update preparation cancelled')
+            name = safe_path(entry['path'])
+            path = install / name
+            if name.lower() in seen or install not in path.resolve().parents:
+                raise ValueError('Invalid delta path')
+            seen.add(name.lower())
+            digest = entry.get('old_sha256')
+            if digest is None and kind == 'files':
+                matches = matches and not path.exists()
+            elif not isinstance(digest, str) or not re.fullmatch('[a-fA-F0-9]{64}', digest):
+                raise ValueError('Invalid delta baseline hash')
+            elif matches and (not path.is_file() or file_hash(path) != digest.lower()):
+                matches = False
+    return matches
 
 
 def prepare_full_update(package, install, current, target, expected, output, cancelled=lambda: False):
@@ -80,6 +115,16 @@ def prepare_full_update(package, install, current, target, expected, output, can
                 path = destination(name)
                 previous = file_hash(path) if path.is_file() else None
                 checksum = hashlib.sha256()
+                unchanged_candidate = previous is not None and path.stat().st_size == item.file_size
+                if unchanged_candidate:
+                    with archive.open(item) as source:
+                        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                            if cancelled():
+                                raise ValueError('Update preparation cancelled')
+                            checksum.update(chunk)
+                    if checksum.hexdigest() == previous:
+                        continue
+                    checksum = hashlib.sha256()
                 with archive.open(item) as source, delta.open('files/' + name, 'w') as dest:
                     for chunk in iter(lambda: source.read(1024 * 1024), b''):
                         if cancelled():

@@ -8,6 +8,44 @@ _dll_directories = {}
 _qt_tls_ready = False
 
 
+def start_update_helper(arguments, directory):
+    """Launch system PowerShell without inheriting the portable DLL search path."""
+    import ctypes
+    import subprocess
+
+    install = os.path.normcase(os.path.abspath(os.path.dirname(sys.executable)))
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith('_PYI_')}
+    system = Path(env.get('SystemRoot', r'C:\Windows'))
+    powershell = system / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    paths = []
+    for item in env.get('PATH', '').split(os.pathsep):
+        if not item:
+            continue
+        normalized = os.path.normcase(os.path.abspath(os.path.expandvars(item.strip('"'))))
+        if normalized != install and not normalized.startswith(install + os.sep):
+            paths.append(item)
+    env['PATH'] = os.pathsep.join(paths)
+
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    query = kernel.GetDllDirectoryW
+    query.argtypes = [ctypes.c_uint32, ctypes.c_wchar_p]
+    query.restype = ctypes.c_uint32
+    length = query(0, None)
+    previous = ctypes.create_unicode_buffer(length or 1)
+    if length:
+        query(length, previous)
+    set_directory = kernel.SetDllDirectoryW
+    set_directory.argtypes = [ctypes.c_wchar_p]
+    set_directory.restype = ctypes.c_int
+    if not set_directory(None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return subprocess.Popen([str(powershell), *arguments], cwd=str(directory), env=env,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+    finally:
+        set_directory(previous.value or None)
+
+
 def configure_qt_tls():
     """Select Windows TLS before Qt creates any encrypted connections.
 

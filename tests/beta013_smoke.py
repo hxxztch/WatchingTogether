@@ -151,9 +151,11 @@ def main():
             wait(lambda: host._pip.isVisible())
             with patch.object(sys, '_MEIPASS', directory, create=True), \
                     patch.object(sys, 'frozen', True, create=True), \
-                    patch('app.ui.settings.subprocess.Popen') as launch, \
+                    patch('app.ui.settings.start_update_helper') as launch, \
+                    patch('app.full_update.delta_matches_install', return_value=True), \
                     patch.object(QApplication, 'quit') as quit_app:
                 settings.install_update()
+                wait(lambda: settings._prepare_worker is None)
                 assert launch.call_count == quit_app.call_count == 1
                 assert host._closing and not host._pip.isVisible() and host._rooms.host is None
                 assert not backend._event_thread.is_alive(), 'mpv thread must stop before Qt exits'
